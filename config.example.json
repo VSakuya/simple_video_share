@@ -3,5 +3,6 @@
   "port": 8080,
   "drive_folder_id": "your google drive folder id",
   "secret_key": "change-me-on-first-run",
+  "base_path": "",
   "debug": false
 }

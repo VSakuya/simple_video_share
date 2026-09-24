@@ -56,7 +56,7 @@
                     data-video-id="{{ video['id'] }}"
                     data-title="{{ video['title'] }}"
                     data-description="{{ video['description'] or '' }}"
-                    data-cover="{{ '/covers/' + video['cover_filename'] if video['cover_filename'] else url_for('static', filename='img/placeholder.svg') }}">Edit</button>
+                    data-cover="{{ url_for('home.cover', filename=video['cover_filename']) if video['cover_filename'] else url_for('static', filename='img/placeholder.svg') }}">Edit</button>
             <form method="post"
                   action="{{ url_for('user.delete_video', video_id=video['id']) }}"
                   data-confirm="Delete this video? This also removes the local copy and the Google Drive file.">
@@ -114,7 +114,7 @@
 
   document.querySelectorAll('.btn-edit').forEach(function (btn) {
     btn.addEventListener('click', function () {
-      form.action = '/user/videos/' + btn.dataset.videoId + '/edit';
+      form.action = window.SVS_BASE + '/user/videos/' + btn.dataset.videoId + '/edit';
       titleInput.value = btn.dataset.title;
       descInput.value = btn.dataset.description || '';
       coverInput.value = '';
@@ -148,7 +148,7 @@
   var known = {};
   rows.forEach(function (el) { known[el.getAttribute('data-video-id')] = true; });
   var timer = setInterval(function () {
-    fetch('/user/progress').then(function (r) { return r.json(); }).then(function (data) {
+    fetch(window.SVS_BASE + '/user/progress').then(function (r) { return r.json(); }).then(function (data) {
       var changed = false;
       Object.keys(known).forEach(function (id) {
         var p = data[id];

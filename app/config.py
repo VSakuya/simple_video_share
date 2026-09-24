@@ -22,6 +22,9 @@ DEFAULTS: dict[str, Any] = {
     "drive_folder_id": "",
     "secret_key": "",
     "debug": False,
+    # Subpath the app is mounted under when behind a reverse proxy (e.g. "/video").
+    # Empty string means "serve from the domain root" (local development).
+    "base_path": "",
 }
 
 

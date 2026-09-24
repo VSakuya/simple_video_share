@@ -18,6 +18,12 @@
 
 import { FFmpeg } from "./ffmpeg/lib/index.js";
 
+// Base path the app is mounted under behind a reverse proxy ("" at the domain
+// root). Set in base.html as window.SVS_BASE. Prefix every hard-coded
+// app-relative URL with it so fetches / redirects / asset loads work under
+// e.g. /video as well as at the root.
+const SVS_BASE = (typeof window !== "undefined" && window.SVS_BASE) ? window.SVS_BASE : "";
+
 const SEGMENT_THRESHOLD = 1024 * 1024 * 1024; // split when final size > 1 GB
 const SEGMENT_SIZE = 512 * 1024 * 1024; // 512 MB per part
 const MAX_HEIGHT = 1080;
@@ -54,7 +60,7 @@ const videoMeta = $("video-meta");
 // --- Client-side logging (console + on-page panel + POST to the server) ---
 // Every pipeline stage is logged so a failure can be diagnosed from the
 // server-side storage/logs/client.log without reopening DevTools.
-const LOG_ENDPOINT = "/upload/log";
+const LOG_ENDPOINT = SVS_BASE + "/upload/log";
 let _logBuffer = [];
 let _logTimer = null;
 
@@ -258,7 +264,7 @@ function showSuccess() {
     if (n <= 0) {
       clearInterval(successTimer);
       successTimer = null;
-      window.location.href = "/user";
+      window.location.href = SVS_BASE + "/user";
       return;
     }
     countdown.textContent = String(n);
@@ -266,7 +272,7 @@ function showSuccess() {
   $("success-go").addEventListener("click", () => {
     if (successTimer) clearInterval(successTimer);
     successTimer = null;
-    window.location.href = "/user";
+    window.location.href = SVS_BASE + "/user";
   });
 }
 
@@ -582,8 +588,8 @@ async function runFfmpeg(opts) {
   ffmpeg.on("progress", onProgress);
   try {
     await ffmpeg.load({
-      coreURL: "/static/js/ffmpeg/ffmpeg-core.js",
-      wasmURL: "/static/js/ffmpeg/ffmpeg-core.wasm",
+      coreURL: SVS_BASE + "/static/js/ffmpeg/ffmpeg-core.js",
+      wasmURL: SVS_BASE + "/static/js/ffmpeg/ffmpeg-core.wasm",
     });
     await ffmpeg.createDir("/in");
     // Fixed, safe node name for the streamed source (avoids odd characters).
@@ -1031,7 +1037,7 @@ async function singleUpload() {
   addMeta(fd);
   clientLog("info", "Uploading (single) " + fmtMB(processedBlob.size));
   setProgress(0, "Uploading…");
-  await xhrPost("/upload/submit", fd, makeProgressCb(0, processedBlob.size));
+  await xhrPost(SVS_BASE + "/upload/submit", fd, makeProgressCb(0, processedBlob.size));
   clientLog("info", "Upload accepted by server");
   $("progress-speed").classList.add("hidden");
   setProgress(1, "Done");
@@ -1040,7 +1046,7 @@ async function singleUpload() {
 async function segmentedUpload() {
   const totalParts = Math.ceil(processedBlob.size / SEGMENT_SIZE);
   clientLog("info", "Uploading (segmented) " + totalParts + " part(s) of " + fmtMB(processedBlob.size));
-  const startRes = await fetch("/upload/seg/start", {
+  const startRes = await fetch(SVS_BASE + "/upload/seg/start", {
     method: "POST",
     headers: { "X-Requested-With": "XMLHttpRequest" },
     body: new URLSearchParams({
@@ -1062,7 +1068,7 @@ async function segmentedUpload() {
     fd.append("part_index", String(i));
     fd.append("part", part, "part_" + i + ".bin");
     setProgress(i / totalParts, "Uploading segment " + (i + 1) + "/" + totalParts + "…");
-    await xhrPost("/upload/seg/part", fd, makeProgressCb(i * SEGMENT_SIZE, totalBytes));
+    await xhrPost(SVS_BASE + "/upload/seg/part", fd, makeProgressCb(i * SEGMENT_SIZE, totalBytes));
   }
 
   const fd = new FormData();
@@ -1071,7 +1077,7 @@ async function segmentedUpload() {
   fd.append("description", descriptionInput.value || "");
   addMeta(fd);
   setProgress(1, "Finalizing…");
-  await xhrPost("/upload/seg/finish", fd, () => {});
+  await xhrPost(SVS_BASE + "/upload/seg/finish", fd, () => {});
   $("progress-speed").classList.add("hidden");
   setProgress(1, "Done");
 }

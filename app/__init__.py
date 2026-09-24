@@ -59,6 +59,17 @@ def create_app() -> Flask:
     app.config["AVATARS_DIR"] = avatars_dir
     app.config["DRIVE_FOLDER_ID"] = cfg.get("drive_folder_id", "")
 
+    # Subpath the app is mounted under behind a reverse proxy (e.g. "/video").
+    # Normalize: strip any trailing slash, keep the leading slash. Empty means
+    # "serve from the domain root". Exposed to templates as ``svs_base``.
+    base_path = str(cfg.get("base_path", "") or "").strip()
+    if base_path:
+        base_path = base_path.rstrip("/")
+        if not base_path.startswith("/"):
+            base_path = "/" + base_path
+    app.config["BASE_PATH"] = base_path
+
+
     # Initialise the database (idempotent) and ensure the bootstrap admin.
     db.init_db()
     db.ensure_default_admin()
@@ -136,6 +147,10 @@ def create_app() -> Flask:
             "session_username": user["username"] if user else "",
             "user_is_admin": bool(user and user.get("is_admin")),
             "current_user_obj": user,
+            # Subpath the app is mounted under behind a reverse proxy ("", or e.g.
+            # "/video"). Lets templates build the few hand-written URLs without
+            # url_for. url_for() itself already picks this up via SCRIPT_NAME.
+            "svs_base": app.config["BASE_PATH"],
         }
 
     @app.before_request
@@ -154,5 +169,18 @@ def create_app() -> Flask:
         if request.path in ("/auth/change-password", "/auth/logout", "/auth/login"):
             return None
         return redirect(url_for("auth.change_password"))
+
+    # When mounted under a subpath (e.g. "/video" behind an Apache reverse proxy),
+    # tell Flask where it lives so url_for() and the /static handler emit
+    # base-prefixed URLs. Apache strips the prefix, so PATH_INFO is already
+    # app-relative; we just record the mount point as SCRIPT_NAME.
+    if base_path:
+        _wsgi_app = app.wsgi_app
+
+        def _base_path_wsgi_app(environ, start_response):
+            environ["SCRIPT_NAME"] = base_path
+            return _wsgi_app(environ, start_response)
+
+        app.wsgi_app = _base_path_wsgi_app
 
     return app
