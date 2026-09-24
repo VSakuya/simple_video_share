@@ -3,10 +3,26 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script>
+    // Theme bootstrap (§13.26): run before the CSS loads so there is no flash.
+    // Use the saved choice if present, else the system preference.
+    (function () {
+      var t = null;
+      try { t = localStorage.getItem('svs-theme'); } catch (e) { t = null; }
+      if (t !== 'dark' && t !== 'light') {
+        t = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches)
+          ? 'dark' : 'light';
+      }
+      document.documentElement.setAttribute('data-theme', t);
+      document.documentElement.style.colorScheme = t;
+    })();
+  </script>
   <link rel="stylesheet" href="{{ url_for('static', filename='vendor/pico.min.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
   <title>{% block title %}Simple Video Share{% endblock %}</title>
   <script>window.SVS_BASE = "{{ svs_base }}";</script>
+  <script src="{{ url_for('static', filename='js/inpage.js') }}"></script>
+  {% block head %}{% endblock %}
 </head>
 <body>
   <!-- Mobile top bar (hidden on desktop, where the sidebar is always visible) -->
@@ -48,6 +64,9 @@
       </a>
       {% endif %}
     </nav>
+    <button type="button" class="sidebar__theme-toggle" id="theme-toggle" title="Toggle light/dark theme">
+      <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></span><span class="label">Theme</span>
+    </button>
     {% if session.user_id %}
     <div class="sidebar__footer">
       <a class="sidebar__item{% if request.path == url_for('auth.account') %} is-active{% endif %}"
@@ -117,6 +136,18 @@
         localStorage.setItem('sidebar-collapsed',
           body.classList.contains('sidebar-collapsed') ? '1' : '0');
       });
+
+      // Theme toggle (§13.26): flip data-theme and persist to localStorage.
+      var themeBtn = document.getElementById('theme-toggle');
+      if (themeBtn) {
+        themeBtn.addEventListener('click', function () {
+          var next = document.documentElement.getAttribute('data-theme') === 'dark'
+            ? 'light' : 'dark';
+          document.documentElement.setAttribute('data-theme', next);
+          document.documentElement.style.colorScheme = next;
+          try { localStorage.setItem('svs-theme', next); } catch (e) { /* private mode */ }
+        });
+      }
     })();
   </script>
   <script>

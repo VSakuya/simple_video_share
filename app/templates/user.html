@@ -1,27 +1,46 @@
 {% extends "base.html" %}
 {% block title %}My Videos — Simple Video Share{% endblock %}
 {% block content %}
+{% macro folder_li(f) %}
+<li>
+  <div class="folder-tree__row">
+    <form method="post" action="{{ url_for('user.rename_folder', folder_id=f['id']) }}" class="folder-rename">
+      <input type="text" name="name" value="{{ f['name'] }}" required>
+      <button type="submit" class="btn btn--ghost btn--sm">Rename</button>
+    </form>
+    <form method="post" action="{{ url_for('user.delete_folder', folder_id=f['id']) }}"
+          data-confirm="Delete folder '{{ f['name'] }}'? Its videos move to Root.">
+      <button type="submit" class="btn btn--danger btn--sm">Delete</button>
+    </form>
+    <form method="post" action="{{ url_for('user.create_folder') }}" class="folder-add-sub">
+      <input type="hidden" name="parent_id" value="{{ f['id'] }}">
+      <input type="text" name="name" placeholder="Subfolder" required>
+      <button type="submit" class="btn btn--ghost btn--sm">+ Sub</button>
+    </form>
+  </div>
+  {% if f['children'] %}
+  <ul>
+    {% for child in f['children'] %}
+    {{ folder_li(child) }}
+    {% endfor %}
+  </ul>
+  {% endif %}
+</li>
+{% endmacro %}
 <div class="page">
   <h1>My videos</h1>
 
   <section class="panel">
     <h2>Folders</h2>
-    <ul id="folder-list">
-      {% for folder in folders %}
-      <li class="folder-row">
-        <form method="post" action="{{ url_for('user.rename_folder', folder_id=folder['id']) }}" class="folder-rename">
-          <input type="text" name="name" value="{{ folder['name'] }}" required>
-          <button type="submit" class="btn btn--ghost btn--sm">Rename</button>
-        </form>
-        <form method="post" action="{{ url_for('user.delete_folder', folder_id=folder['id']) }}"
-              data-confirm="Delete folder '{{ folder['name'] }}'? Its videos move to Root.">
-          <button type="submit" class="btn btn--danger btn--sm">Delete</button>
-        </form>
-      </li>
-      {% else %}
-      <li class="muted">No folders.</li>
+    {% if folders %}
+    <ul class="folder-tree">
+      {% for f in folders %}
+      {{ folder_li(f) }}
       {% endfor %}
     </ul>
+    {% else %}
+    <p class="muted">No folders.</p>
+    {% endif %}
     <form method="post" action="{{ url_for('user.create_folder') }}" class="folder-create">
       <input type="text" name="name" placeholder="New folder name" required>
       <button type="submit" class="btn btn--sm">Create folder</button>
@@ -41,8 +60,9 @@
             <form method="post" action="{{ url_for('user.move_video', video_id=video['id']) }}" class="folder-move">
               <select name="folder_id" class="folder-move__select" onchange="this.form.submit()">
                 <option value="">Root</option>
-                {% for f in folders %}
-                <option value="{{ f['id'] }}" {% if video['folder_id'] == f['id'] %}selected{% endif %}>{{ f['name'] }}</option>
+                {% for f in folders_flat %}
+                {% set indent = '&nbsp;' * 4 * f['depth'] %}
+                <option value="{{ f['id'] }}" {% if video['folder_id'] == f['id'] %}selected{% endif %}>{{ indent | safe }}{{ f['name'] }}</option>
                 {% endfor %}
               </select>
             </form>

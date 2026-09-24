@@ -932,6 +932,11 @@ previewVideo.addEventListener("timeupdate", () => {
   if (end > 0 && previewVideo.currentTime >= end) previewVideo.pause();
 });
 
+// In-page fullscreen for the clip panel (§13.26): the button carries
+// data-inpage-expand="#clip-timeline", so inpage.js (loaded from base.html)
+// moves the whole timeline into a page-level overlay. Set Start / Set End stay
+// visible at the bottom; no browser Fullscreen API is used.
+
 // Point the preview <video> at a newly selected file (and its object URL).
 function setupTimeline(file) {
   if (videoUrl) URL.revokeObjectURL(videoUrl);

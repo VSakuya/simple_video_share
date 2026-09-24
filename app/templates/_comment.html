@@ -1,0 +1,64 @@
+{#
+  Single comment (top-level or reply) — included from watch.html and rendered
+  server-side for AJAX replies (§13.26). Expects: c (comment dict with
+  is_reply, replies, author_id, avatar_filename, username, body, created_at),
+  video_id, max_comment_length. current_user_obj / user_is_admin come from the
+  global context processor. Replies are leaf nodes, so their markup is inlined
+  (no recursion).
+#}
+<li class="comment{% if c['is_reply'] %} comment--reply{% endif %}" data-comment-id="{{ c['id'] }}">
+  <img class="comment__avatar"
+       src="{{ url_for('home.avatar_file', filename=c['avatar_filename']) if c['avatar_filename'] else url_for('static', filename='img/avatar-default.svg') }}"
+       alt="">
+  <div class="comment__main">
+    <div class="comment__head">
+      <span class="comment__author">{{ c['username'] }}</span>
+      <span class="comment__time muted" data-ts="{{ c['created_at'] }}">{{ c['created_at'][:16] }} UTC</span>
+      {% if c['author_id'] == current_user_obj['id'] or user_is_admin %}
+      <button type="button" class="btn btn--ghost btn--sm comment__delete"
+              data-delete-url="{{ url_for('watch.delete_comment', video_id=video_id, comment_id=c['id']) }}"
+              data-confirm="Delete this comment{% if not c['is_reply'] %} and all its replies{% endif %}?">Delete</button>
+      {% endif %}
+    </div>
+    <div class="comment__body">{{ c['body'] }}</div>
+    {% if not c['is_reply'] %}
+    <div class="comment__actions">
+      <button type="button" class="btn btn--ghost btn--sm" data-reply-target="{{ c['id'] }}">Reply</button>
+    </div>
+    <form method="post"
+          action="{{ url_for('watch.add_comment', video_id=video_id) }}"
+          class="comment__reply-form" data-reply-form="{{ c['id'] }}">
+      <input type="hidden" name="parent_id" value="{{ c['id'] }}">
+      <textarea name="body" rows="2" maxlength="{{ max_comment_length }}"
+                class="upload-input" required
+                placeholder="Write a reply…"></textarea>
+      <div class="dialog-actions">
+        <button type="submit" class="btn btn--sm">Post reply</button>
+      </div>
+    </form>
+    {% if c['replies'] %}
+    <ul class="comment__replies">
+      {% for r in c['replies'] %}
+      <li class="comment comment--reply" data-comment-id="{{ r['id'] }}">
+        <img class="comment__avatar"
+             src="{{ url_for('home.avatar_file', filename=r['avatar_filename']) if r['avatar_filename'] else url_for('static', filename='img/avatar-default.svg') }}"
+             alt="">
+        <div class="comment__main">
+          <div class="comment__head">
+            <span class="comment__author">{{ r['username'] }}</span>
+            <span class="comment__time muted" data-ts="{{ r['created_at'] }}">{{ r['created_at'][:16] }} UTC</span>
+            {% if r['author_id'] == current_user_obj['id'] or user_is_admin %}
+            <button type="button" class="btn btn--ghost btn--sm comment__delete"
+                    data-delete-url="{{ url_for('watch.delete_comment', video_id=video_id, comment_id=r['id']) }}"
+                    data-confirm="Delete this reply?">Delete</button>
+            {% endif %}
+          </div>
+          <div class="comment__body">{{ r['body'] }}</div>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+    {% endif %}
+  </div>
+</li>

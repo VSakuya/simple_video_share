@@ -64,6 +64,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE comments ADD COLUMN parent_id INTEGER")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_comments_parent ON comments (parent_id)")
 
+    folder_cols = {row[1] for row in conn.execute("PRAGMA table_info(folders)").fetchall()}
+    if "parent_id" not in folder_cols:
+        conn.execute("ALTER TABLE folders ADD COLUMN parent_id INTEGER")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_folders_parent ON folders (parent_id)")
+
 
 def init_db() -> None:
     """Create all tables (from ``sql/schema.sql``), migrate, and seed defaults."""
@@ -269,10 +274,11 @@ def login_lockout_seconds(username: str, ip: str) -> int:
 # Folders
 # ---------------------------------------------------------------------------
 
-def create_folder(name: str, owner_id: int) -> int:
+def create_folder(name: str, owner_id: int, parent_id: Optional[int] = None) -> int:
     conn = get_db()
     cur = conn.execute(
-        "INSERT INTO folders (name, owner_id) VALUES (?, ?)", (name, owner_id)
+        "INSERT INTO folders (name, owner_id, parent_id) VALUES (?, ?, ?)",
+        (name, owner_id, parent_id),
     )
     conn.commit()
     folder_id = cur.lastrowid
@@ -307,10 +313,119 @@ def rename_folder(folder_id: int, new_name: str) -> None:
 
 
 def delete_folder(folder_id: int) -> None:
+    """Delete a folder, reparenting its children to its grandparent.
+
+    The folder's videos fall back to Root via the ``videos.folder_id`` FK
+    (ON DELETE SET NULL). Its immediate subfolders are re-pointed at this
+    folder's parent (or Root), so the rest of the hierarchy is preserved.
+    """
     conn = get_db()
+    row = conn.execute(
+        "SELECT parent_id FROM folders WHERE id = ?", (folder_id,)
+    ).fetchone()
+    grandparent = row["parent_id"] if row is not None else None
+    if grandparent is None:
+        conn.execute(
+            "UPDATE folders SET parent_id = NULL WHERE parent_id = ?", (folder_id,)
+        )
+    else:
+        conn.execute(
+            "UPDATE folders SET parent_id = ? WHERE parent_id = ?",
+            (grandparent, folder_id),
+        )
     conn.execute("DELETE FROM folders WHERE id = ?", (folder_id,))
     conn.commit()
     conn.close()
+
+
+def list_root_folders() -> list[dict[str, Any]]:
+    """Top-level folders (no parent), across all owners, for the home page."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM folders WHERE parent_id IS NULL ORDER BY name"
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def list_child_folders(folder_id: int) -> list[dict[str, Any]]:
+    """Immediate subfolders of ``folder_id``, across all owners."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM folders WHERE parent_id = ? ORDER BY name", (folder_id,)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def list_folder_videos(folder_id: Optional[int]) -> list[dict[str, Any]]:
+    """Ready videos inside ``folder_id``; ``None`` means Root (no folder)."""
+    conn = get_db()
+    if folder_id is None:
+        rows = conn.execute(
+            """SELECT v.*, u.username AS owner_name,
+                      u.avatar_filename AS owner_avatar_filename
+               FROM videos v JOIN users u ON v.owner_id = u.id
+               WHERE v.status = 'ready' AND v.folder_id IS NULL
+               ORDER BY v.uploaded_at DESC"""
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """SELECT v.*, u.username AS owner_name,
+                      u.avatar_filename AS owner_avatar_filename
+               FROM videos v JOIN users u ON v.owner_id = u.id
+               WHERE v.status = 'ready' AND v.folder_id = ?
+               ORDER BY v.uploaded_at DESC""",
+            (folder_id,),
+        ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def folders_tree(owner_id: int) -> list[dict[str, Any]]:
+    """The owner's folders as a nested list; each item has a ``children`` list."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM folders WHERE owner_id = ? ORDER BY name", (owner_id,)
+    ).fetchall()
+    conn.close()
+    folders = [dict(r) for r in rows]
+    # Initialize ``children`` for every folder up front: a child can sort before
+    # its parent (rows are ordered by name), so the parent's list must exist
+    # before we append to it.
+    for f in folders:
+        f["children"] = []
+    by_id: dict[int, dict[str, Any]] = {f["id"]: f for f in folders}
+    roots: list[dict[str, Any]] = []
+    for f in folders:
+        pid = f.get("parent_id")
+        if pid is not None and pid in by_id:
+            by_id[pid]["children"].append(f)
+        else:
+            roots.append(f)
+
+    def sort(nodes: list[dict[str, Any]]) -> None:
+        nodes.sort(key=lambda x: (x["name"] or "").lower())
+        for n in nodes:
+            sort(n["children"])
+
+    sort(roots)
+    return roots
+
+
+def folders_with_depth(owner_id: int) -> list[dict[str, Any]]:
+    """Flat, depth-annotated list of the owner's folders (parent before child)."""
+    flat: list[dict[str, Any]] = []
+
+    def walk(nodes: list[dict[str, Any]], depth: int) -> None:
+        for f in nodes:
+            item = {k: v for k, v in f.items() if k != "children"}
+            item["depth"] = depth
+            flat.append(item)
+            walk(f["children"], depth + 1)
+
+    walk(folders_tree(owner_id), 0)
+    return flat
 
 
 # ---------------------------------------------------------------------------
@@ -535,7 +650,7 @@ def list_comments(video_id: int) -> list[dict[str, Any]]:
     ``comment['replies']``, all ordered oldest-first."""
     conn = get_db()
     rows = conn.execute(
-        """SELECT c.id, c.parent_id, c.body, c.created_at,
+        """SELECT c.id, c.parent_id, c.body, c.created_at, c.author_id,
                   u.username, u.avatar_filename
            FROM comments c
            JOIN users u ON c.author_id = u.id

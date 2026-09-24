@@ -28,8 +28,11 @@ logger = logging.getLogger("simple_video_share.routes.user")
 def index() -> str:
     me = current_user()
     videos = db.list_videos_by_owner(me["id"]) if me else []
-    folders = db.list_folders(me["id"]) if me else []
-    return render_template("user.html", videos=videos, folders=folders)
+    folders = db.folders_tree(me["id"]) if me else []
+    folders_flat = db.folders_with_depth(me["id"]) if me else []
+    return render_template(
+        "user.html", videos=videos, folders=folders, folders_flat=folders_flat
+    )
 
 
 @user_bp.route("/progress")
@@ -150,7 +153,15 @@ def create_folder() -> Any:
             return jsonify(ok=False, error="Folder name is required."), 400
         flash("Folder name is required.", "error")
         return redirect(url_for("user.index"))
-    folder_id = db.create_folder(name, me["id"])
+    parent_id = _optional_int(request.form.get("parent_id"))
+    if parent_id is not None:
+        parent = db.get_folder(parent_id)
+        if parent is None or (parent["owner_id"] != me["id"] and not me.get("is_admin")):
+            if _is_ajax():
+                return jsonify(ok=False, error="That folder does not exist."), 400
+            flash("That folder does not exist.", "error")
+            return redirect(url_for("user.index"))
+    folder_id = db.create_folder(name, me["id"], parent_id=parent_id)
     if _is_ajax():
         return jsonify(ok=True, folder_id=folder_id)
     flash("Folder created.", "success")

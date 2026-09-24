@@ -46,8 +46,14 @@
   <!-- Preview + clip (shown after file selected) -->
   <div id="clip-panel" class="upload-section hidden">
     <label class="upload-label">Preview &amp; clip</label>
-    <div class="upload-timeline">
+    <div class="upload-timeline" id="clip-timeline">
       <video id="preview-video" class="upload-timeline__video" controls playsinline></video>
+      <button type="button" class="clip-fullscreen-btn" id="clip-fs-btn"
+              data-inpage-expand="#clip-timeline" title="In-page fullscreen">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+        </svg>
+      </button>
       <div class="upload-clip-controls">
         <div class="upload-clip-controls__group">
           <button type="button" id="set-start-btn" class="upload-clip-controls__btn">Set Start</button>
@@ -87,7 +93,8 @@
     <select id="folder-select" class="upload-input">
       <option value="">Root</option>
       {% for f in folders %}
-      <option value="{{ f['id'] }}">{{ f['name'] }}</option>
+      {% set indent = '&nbsp;' * 4 * f['depth'] %}
+      <option value="{{ f['id'] }}">{{ indent | safe }}{{ f['name'] }}</option>
       {% endfor %}
       <option value="__new__">New folder…</option>
     </select>

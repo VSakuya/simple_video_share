@@ -32,7 +32,7 @@ from flask import (
     url_for,
 )
 
-from .. import db, drive, storage
+from .. import db, drive, mp4, storage
 from .. import drive_worker
 from ..auth import login_required
 from ..log import log_client
@@ -47,7 +47,7 @@ upload_bp = Blueprint("upload", __name__, url_prefix="/upload")
 def index() -> Any:
     from ..auth import current_user
     me = current_user()
-    folders = db.list_folders(me["id"]) if me else []
+    folders = db.folders_with_depth(me["id"]) if me else []
     return render_template("upload.html", folders=folders)
 
 
@@ -304,6 +304,10 @@ def _register_and_enqueue(
         return None, "Could not create the video record."
 
     local_path = os.path.join(str(videos_dir), video_name)
+    # Move the moov atom to the front (faststart) so Range streaming can start
+    # playback immediately. The mediabunny path is already faststart; this
+    # covers the ffmpeg.wasm fallback and direct-pass uploads. No-op on error.
+    mp4.ensure_faststart(local_path)
     drive_worker.worker.enqueue(
         video_id,
         title,

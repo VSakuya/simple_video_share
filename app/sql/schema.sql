@@ -16,8 +16,10 @@ CREATE TABLE IF NOT EXISTS folders (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     name        TEXT    NOT NULL,
     owner_id    INTEGER NOT NULL,
+    parent_id   INTEGER,
     created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
-    FOREIGN KEY (owner_id) REFERENCES users (id) ON DELETE CASCADE
+    FOREIGN KEY (owner_id)  REFERENCES users   (id) ON DELETE CASCADE,
+    FOREIGN KEY (parent_id) REFERENCES folders (id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS videos (

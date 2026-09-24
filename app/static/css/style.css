@@ -1,19 +1,78 @@
 /* Pico CSS (vendored at static/vendor/pico.min.css) is loaded before this
    file; its light-theme variables are re-themed below. */
+/* Theme tokens (§13.26). The active theme is chosen with
+   <html data-theme="dark|light"> (Pico v2's own mechanism); the app-level --*
+   tokens below are re-defined per theme so every surface generalizes. */
 :root {
+  /* Layout-only tokens (theme-independent). */
+  --sidebar-w: 15rem;
+  --sidebar-w-collapsed: 5rem;
+}
+[data-theme="dark"] {
   color-scheme: dark;
   --bg: #0f1115;
   --panel: #171b22;
+  --panel-2: #1a2130;
   --text: #e6e8ee;
   --muted: #9aa4b2;
   --accent: #4f8cff;
-  --sidebar-w: 220px;
-  --sidebar-w-collapsed: 64px;
+  --border: #232936;
+  --border-strong: #3a4258;
+  --hover: #202733;
+  --active: #232b3a;
+  --input-bg: #0d1016;
+  --input-border: #2a3242;
+  --bar-bg: #222a38;
+  --btn-ghost-bg: #1e2533;
+  --btn-ghost-hover: #252f40;
+  --overlay: #12161f;
+  --log-bg: #0a0c10;
+  --warn-fg: #ffd479;
+  --log-info: #9aa4b2;
+  --log-debug: #6b7280;
+  --log-warn: #fbbf24;
+  --log-error: #f87171;
+  --flash-success-bg: #12351f; --flash-success-fg: #8ef0a0;
+  --flash-error-bg: #3a1518;  --flash-error-fg: #ff9a9a;
+  --flash-info-bg: #12233a;   --flash-info-fg: #9cc3ff;
   /* Pico dark-theme overrides */
   --pico-background-color: #0f1115;
   --pico-card-background-color: #171b22;
   --pico-primary: #4f8cff;
   --pico-form-element-background-color: #0d1016;
+}
+[data-theme="light"] {
+  color-scheme: light;
+  --bg: #eef1f6;
+  --panel: #ffffff;
+  --panel-2: #eaeef4;
+  --text: #1b2330;
+  --muted: #5a6472;
+  --accent: #2f6fe0;
+  --border: #d6dce6;
+  --border-strong: #aab4c5;
+  --hover: #e7ebf2;
+  --active: #d3e0f5;
+  --input-bg: #ffffff;
+  --input-border: #c2cad6;
+  --bar-bg: #dfe4ec;
+  --btn-ghost-bg: #eef1f6;
+  --btn-ghost-hover: #dde3ee;
+  --overlay: #ffffff;
+  --log-bg: #f4f6f9;
+  --warn-fg: #a8720a;
+  --log-info: #5a6472;
+  --log-debug: #8a94a3;
+  --log-warn: #b45309;
+  --log-error: #dc2626;
+  --flash-success-bg: #d7f2e2; --flash-success-fg: #157347;
+  --flash-error-bg: #fbe0e4;  --flash-error-fg: #b4232f;
+  --flash-info-bg: #dbe8fb;   --flash-info-fg: #1d5fc0;
+  /* Pico light-theme overrides */
+  --pico-background-color: #eef1f6;
+  --pico-card-background-color: #ffffff;
+  --pico-primary: #2f6fe0;
+  --pico-form-element-background-color: #ffffff;
 }
 
 * { box-sizing: border-box; }
@@ -25,7 +84,9 @@ body {
 }
 
 /* Pico's default type scale is too large for this app — shrink it. */
-html { font-size: 14px; }
+/* Proportional sizing (§13.26): the root font scales with viewport width so the
+   whole rem-based UI (Pico + this app) grows on high-resolution screens. */
+html { font-size: clamp(13px, 0.2vw + 12px, 22px); }
 h1 { font-size: 1.35rem; }
 h2 { font-size: 1.1rem; }
 h3 { font-size: 1rem; }
@@ -50,7 +111,7 @@ table { font-size: 0.88rem; }
   position: fixed; top: 0; left: 0; bottom: 0;
   width: var(--sidebar-w);
   background: var(--panel);
-  border-right: 1px solid #232936;
+  border-right: 1px solid var(--border);
   padding: 8px 10px;
   overflow-y: auto;
   z-index: 50;
@@ -65,7 +126,7 @@ table { font-size: 0.88rem; }
   border-radius: 8px; cursor: pointer;
 }
 .sidebar__toggle svg { width: 18px; height: 18px; display: block; margin: 0 auto; }
-.sidebar__toggle:hover { background: #202733; color: var(--text); }
+.sidebar__toggle:hover { background: var(--hover); color: var(--text); }
 .sidebar__brand { padding: 14px 12px 10px; font-size: 1rem; }
 .sidebar__brand a { color: var(--text); text-decoration: none; font-weight: 700; }
 .sidebar__nav { display: flex; flex-direction: column; gap: 2px; flex: 0 0 auto; }
@@ -76,14 +137,25 @@ table { font-size: 0.88rem; }
 }
 .sidebar__item .icon { flex: 0 0 20px; display: inline-flex; align-items: center; justify-content: center; }
 .sidebar__item .icon svg { width: 19px; height: 19px; display: block; }
-.sidebar__item:hover { background: #202733; color: var(--text); }
-.sidebar__item.is-active { background: #232b3a; color: var(--text); font-weight: 600; }
-.sidebar__item--out { margin-top: 12px; border-top: 1px solid #232936; padding-top: 14px; }
+.sidebar__item:hover { background: var(--hover); color: var(--text); }
+.sidebar__item.is-active { background: var(--active); color: var(--text); font-weight: 600; }
+.sidebar__item--out { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 14px; }
+/* Sidebar theme toggle (§13.26): a nav-style button that flips light/dark. */
+.sidebar__theme-toggle {
+  display: flex; align-items: center; gap: 12px;
+  padding: 9px 12px; border-radius: 8px;
+  color: var(--muted); text-decoration: none; font-size: 0.9rem;
+  background: none; border: none; cursor: pointer;
+  width: 100%; font-family: inherit; text-align: left;
+}
+.sidebar__theme-toggle .icon { flex: 0 0 20px; display: inline-flex; align-items: center; justify-content: center; }
+.sidebar__theme-toggle .icon svg { width: 19px; height: 19px; display: block; }
+.sidebar__theme-toggle:hover { background: var(--hover); color: var(--text); }
 /* Bottom-left account + logout group (the avatar replaces the Account icon). */
 .sidebar__footer {
   margin-top: auto;
   padding-top: 12px;
-  border-top: 1px solid #232936;
+  border-top: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -109,7 +181,7 @@ body.sidebar-collapsed .main { margin-left: var(--sidebar-w-collapsed); }
   .topbar {
     display: flex; align-items: center; gap: 6px;
     position: sticky; top: 0; z-index: 60;
-    background: var(--panel); border-bottom: 1px solid #232936;
+    background: var(--panel); border-bottom: 1px solid var(--border);
     padding: 6px 10px;
   }
   .sidebar { transform: translateX(-100%); transition: transform 0.2s ease; }
@@ -127,7 +199,7 @@ body.sidebar-collapsed .main { margin-left: var(--sidebar-w-collapsed); }
   body.sidebar-collapsed .sidebar__item { justify-content: flex-start; padding: 9px 12px; }
 }
 
-.container { max-width: 1200px; margin: 0 auto; padding: 16px; }
+.container { max-width: 92rem; margin: 0 auto; padding: 1.25rem; }
 h1 { font-size: 1.35rem; }
 h2 { font-size: 1.1rem; }
 .muted { color: var(--muted); }
@@ -141,15 +213,15 @@ h2 { font-size: 1.1rem; }
 .auth-card label { display: flex; flex-direction: column; gap: 4px; }
 input, button, select {
   font: inherit; padding: 8px 10px; border-radius: 6px;
-  border: 1px solid #2a3242; background: #0d1016; color: var(--text);
+  border: 1px solid var(--input-border); background: var(--input-bg); color: var(--text);
 }
 button { background: var(--accent); color: #fff; cursor: pointer; }
 button:hover { filter: brightness(1.1); }
 
 .flash { padding: 10px 14px; border-radius: 6px; margin-bottom: 12px; }
-.flash--success { background: #12351f; color: #8ef0a0; }
-.flash--error { background: #3a1518; color: #ff9a9a; }
-.flash--info { background: #12233a; color: #9cc3ff; }
+.flash--success { background: var(--flash-success-bg); color: var(--flash-success-fg); }
+.flash--error { background: var(--flash-error-bg); color: var(--flash-error-fg); }
+.flash--info { background: var(--flash-info-bg); color: var(--flash-info-fg); }
 
 /* Waterfall (masonry) */
 .waterfall {
@@ -180,23 +252,167 @@ button:hover { filter: brightness(1.1); }
 }
 .card__owner { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.bar { background: #222a38; border-radius: 6px; overflow: hidden; height: 14px; }
+/* Folder cards on the home page (§13.26): a folder is a card like a video,
+   but with a folder glyph instead of a cover. */
+.folder-card {
+  display: flex; align-items: center; gap: 12px;
+  background: var(--panel); border-radius: 8px; padding: 14px 16px;
+  text-decoration: none; color: var(--text); margin-bottom: 12px;
+}
+.folder-card:hover { background: var(--hover); }
+.folder-card__icon {
+  flex: 0 0 auto; width: 40px; height: 40px; border-radius: 8px;
+  background: var(--active); color: var(--accent);
+  display: flex; align-items: center; justify-content: center;
+}
+.folder-card__icon svg { width: 22px; height: 22px; }
+.folder-card__name { font-weight: 600; }
+.folder-card__count { font-size: 0.8rem; color: var(--muted); }
+
+/* Breadcrumb trail (§13.26). */
+.breadcrumb {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  margin-bottom: 14px; font-size: 0.88rem;
+}
+.breadcrumb a { color: var(--accent); text-decoration: none; }
+.breadcrumb a:hover { text-decoration: underline; }
+.breadcrumb__sep { color: var(--muted); }
+.breadcrumb__current { color: var(--text); font-weight: 600; }
+
+/* Nested folder tree on the My Videos page (§13.26). Each folder is a row with
+   an inline rename form, a delete form, and an add-subfolder form. */
+.folder-tree, .folder-tree ul { list-style: none; margin: 0; }
+.folder-tree ul { padding-left: 22px; }
+.folder-tree .folder-tree__row {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 4px;
+}
+.folder-tree form { display: flex; align-items: center; gap: 6px; }
+.folder-tree .folder-rename { flex: 1; }
+.folder-tree .folder-rename input { flex: 1; }
+.folder-tree .folder-add-sub input { width: 120px; }
+.folder-tree .btn { width: auto; flex: 0 0 auto; }
+
+.bar { background: var(--bar-bg); border-radius: 6px; overflow: hidden; height: 14px; }
 .bar__fill { height: 100%; width: 0; background: var(--accent); transition: width 0.2s; }
 
 .table { border-collapse: collapse; width: 100%; }
-.table th, .table td { border-bottom: 1px solid #232936; padding: 8px; text-align: left; }
+.table th, .table td { border-bottom: 1px solid var(--border); padding: 8px; text-align: left; }
 /* Horizontal scroll wrapper so wide tables stay usable on mobile. */
 .table-wrap { overflow-x: auto; }
 
-video { background: #000; border-radius: 8px; }
-#caching-status { color: #ffd479; font-weight: 600; margin: 8px 0; }
+/* Player wrapper: rounded corners + shadow live here so the fullscreen button
+   can overlay the video without clipping. */
+.player-wrap {
+  position: relative;
+  margin: 0 0 12px;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+#player {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #000;
+  border-radius: 0;
+}
+/* Fullscreen button: hidden until the user hovers the player. */
+.player-fullscreen-btn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 38px;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  border: none;
+  border-radius: 8px;
+  color: #fff;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.2s;
+  z-index: 10;
+}
+.player-wrap:hover .player-fullscreen-btn { opacity: 1; }
+.player-fullscreen-btn:hover { background: rgba(0, 0, 0, 0.8); }
+.player-fullscreen-btn svg { width: 20px; height: 20px; }
+#player:fullscreen { border-radius: 0; }
+#caching-status { color: var(--warn-fg); font-weight: 600; margin: 8px 0; }
+
+/* ===== video.js player (§13.26) ===== */
+/* video.js ships its own control styling; we only normalize the wrapper so the
+   big-play-button and controls sit inside the rounded card like a native video. */
+.video-js {
+  width: 100% !important;
+  aspect-ratio: 16 / 9;
+  background: #000;
+}
+.video-js .vjs-big-play-button {
+  /* Keep video.js' built-in big-play-button; just make it theme-agnostic. */
+  background: rgba(0, 0, 0, 0.6);
+}
+
+/* ===== In-page fullscreen overlay (§13.26) ===== */
+/* A fixed, page-level overlay used by the watch page and the upload clip panel.
+   Unlike the Fullscreen API it keeps the browser chrome visible, so it is a
+   simple fixed element covering the viewport. inpage.js moves the player
+   element into the stage and back. */
+.inpage-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  background: var(--overlay);
+  display: none;
+}
+.inpage-overlay.is-active { display: block; }
+.inpage-overlay__stage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+/* Applied to the player element while it lives in the overlay. */
+.inpage-overlay__fill {
+  width: 100% !important;
+  height: 100% !important;
+  aspect-ratio: auto !important;
+  border-radius: 0 !important;
+}
+.inpage-overlay__fill:not(.upload-timeline) video,
+.inpage-overlay__fill:not(.upload-timeline) .video-js video {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: contain;
+  background: #000;
+}
+.inpage-overlay__exit {
+  position: absolute;
+  top: 12px;
+  right: 16px;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  border: none;
+  border-radius: 8px;
+  color: #fff;
+  cursor: pointer;
+  z-index: 2001;
+}
+.inpage-overlay__exit:hover { background: rgba(0, 0, 0, 0.8); }
+.inpage-overlay__exit svg { width: 22px; height: 22px; }
 
 /* ===== Upload page ===== */
 .upload-page { max-width: 720px; margin: 0 auto; }
 .upload-page h1 { font-size: 1.5rem; margin-bottom: 20px; }
 
 .upload-dropzone {
-  border: 2px dashed #3a4258;
+  border: 2px dashed var(--border-strong);
   border-radius: 12px;
   padding: 60px 24px;
   display: flex;
@@ -207,11 +423,11 @@ video { background: #000; border-radius: 8px; }
   transition: border-color 0.2s, background 0.2s;
   margin-bottom: 20px;
 }
-.upload-dropzone:hover { border-color: var(--accent); background: #1a2030; }
-.upload-dropzone.drag-over { border-color: var(--accent); background: #1e2a40; }
+.upload-dropzone:hover { border-color: var(--accent); background: var(--hover); }
+.upload-dropzone.drag-over { border-color: var(--accent); background: var(--active); }
 .upload-dropzone.has-file { border-style: solid; border-color: #2a5a3a; }
 
-.upload-dropzone__icon { color: #5a6a8a; margin-bottom: 4px; }
+.upload-dropzone__icon { color: var(--muted); margin-bottom: 4px; }
 .upload-dropzone__text { font-size: 1.05rem; margin: 0; }
 .upload-dropzone__hint { font-size: 0.9rem; color: var(--muted); margin: 0; }
 .upload-dropzone__btn {
@@ -240,8 +456,8 @@ video { background: #000; border-radius: 8px; }
   width: 100%;
   padding: 10px 14px;
   border-radius: 8px;
-  border: 1px solid #2a3242;
-  background: #0d1016;
+  border: 1px solid var(--input-border);
+  background: var(--input-bg);
   color: var(--text);
   font-size: 1rem;
 }
@@ -259,15 +475,15 @@ video { background: #000; border-radius: 8px; }
   object-fit: cover;
 }
 .upload-cover__btn {
-  background: #1e2533;
+  background: var(--btn-ghost-bg);
   color: var(--text);
-  border: 1px solid #2a3242;
+  border: 1px solid var(--input-border);
   padding: 8px 16px;
   border-radius: 8px;
   cursor: pointer;
   font-size: 0.9rem;
 }
-.upload-cover__btn:hover { background: #252f40; }
+.upload-cover__btn:hover { background: var(--btn-ghost-hover); }
 
 .upload-clip {
   display: flex;
@@ -284,20 +500,20 @@ video { background: #000; border-radius: 8px; }
   width: 80px;
   padding: 6px 8px;
   border-radius: 6px;
-  border: 1px solid #2a3242;
-  background: #0d1016;
+  border: 1px solid var(--input-border);
+  background: var(--input-bg);
   color: var(--text);
   text-align: center;
 }
 .upload-clip__apply {
-  background: #2a3242;
+  background: var(--input-border);
   color: var(--text);
   border: none;
   padding: 8px 16px;
   border-radius: 6px;
   cursor: pointer;
 }
-.upload-clip__apply:hover { background: #353f52; }
+.upload-clip__apply:hover { background: var(--btn-ghost-hover); }
 
 .upload-progress-bar { height: 10px; border-radius: 6px; }
 .upload-progress-status { font-size: 0.85rem; color: var(--muted); margin-top: 6px; }
@@ -313,14 +529,14 @@ video { background: #000; border-radius: 8px; }
   border-radius: 8px;
   background: rgba(217, 119, 6, 0.12);
   border: 1px solid rgba(217, 119, 6, 0.5);
-  color: #fbbf24;
+  color: var(--log-warn);
   font-size: 0.85rem;
   line-height: 1.4;
 }
 .upload-warning.upload-warning--error {
   background: rgba(220, 38, 38, 0.12);
   border-color: rgba(220, 38, 38, 0.5);
-  color: #f87171;
+  color: var(--log-error);
 }
 
 /* Success screen (§13.18): full-page overlay shown after the server has the
@@ -335,8 +551,8 @@ video { background: #000; border-radius: 8px; }
   z-index: 1000;
 }
 .upload-success__card {
-  background: #12161f;
-  border: 1px solid #2a3242;
+  background: var(--panel);
+  border: 1px solid var(--border);
   border-radius: 16px;
   padding: 40px 48px;
   max-width: 420px;
@@ -382,7 +598,7 @@ video { background: #000; border-radius: 8px; }
   align-items: center;
 }
 .upload-log-panel__clear {
-  background: #252f40;
+  background: var(--btn-ghost-hover);
   color: var(--muted);
   border: none;
   padding: 4px 12px;
@@ -391,14 +607,14 @@ video { background: #000; border-radius: 8px; }
   font-size: 0.8rem;
 }
 .upload-log-panel__clear:hover {
-  background: #2f3a4f;
+  background: var(--active);
   color: var(--text);
 }
 .upload-log {
   max-height: 220px;
   overflow-y: auto;
-  background: #0a0c10;
-  border: 1px solid #232936;
+  background: var(--log-bg);
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 8px 10px;
   margin-top: 8px;
@@ -411,10 +627,10 @@ video { background: #000; border-radius: 8px; }
   white-space: pre-wrap;
   word-break: break-word;
 }
-.upload-log__line--info { color: #9aa4b2; }
-.upload-log__line--debug { color: #6b7280; }
-.upload-log__line--warn { color: #fbbf24; }
-.upload-log__line--error { color: #f87171; }
+.upload-log__line--info { color: var(--log-info); }
+.upload-log__line--debug { color: var(--log-debug); }
+.upload-log__line--warn { color: var(--log-warn); }
+.upload-log__line--error { color: var(--log-error); }
 
 .upload-submit {
   background: var(--accent);
@@ -433,16 +649,70 @@ video { background: #000; border-radius: 8px; }
 .upload-footer { text-align: center; margin-top: 24px; font-size: 0.85rem; }
 
 /* ===== Upload preview + clip (Set Start / Set End buttons) ===== */
-.upload-timeline { margin-top: 4px; }
+.upload-timeline {
+  margin-top: 4px;
+  position: relative;
+}
 
 .upload-timeline__video {
   display: block;
   width: 100%;
-  max-height: 320px;
+  max-height: 420px;
   border-radius: 8px;
   background: #000;
   margin-bottom: 8px;
 }
+
+/* In-page fullscreen state (§13.26): the video fills the screen and the clip
+   controls stay pinned at the bottom. The whole timeline is moved into the
+   overlay, so the Set Start / Set End controls remain visible. */
+.upload-timeline.inpage-overlay__fill {
+  display: flex;
+  flex-direction: column;
+  background: #000;
+}
+.upload-timeline.inpage-overlay__fill .upload-timeline__video {
+  flex: 1 1 auto;
+  max-height: none;
+  width: 100%;
+  border-radius: 0;
+  object-fit: contain;
+  margin-bottom: 0;
+}
+.upload-timeline.inpage-overlay__fill .upload-clip-controls {
+  flex: 0 0 auto;
+  justify-content: center;
+  padding: 14px 0;
+  background: rgba(0, 0, 0, 0.7);
+  gap: 32px;
+}
+.upload-timeline.inpage-overlay__fill .upload-clip-controls__btn {
+  padding: 10px 28px;
+  font-size: 1rem;
+}
+
+/* Fullscreen button for the clip panel (hover-reveal, same pattern as the watch page). */
+.clip-fullscreen-btn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 38px;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  border: none;
+  border-radius: 8px;
+  color: #fff;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.2s;
+  z-index: 10;
+}
+.upload-timeline:hover .clip-fullscreen-btn { opacity: 1; }
+.clip-fullscreen-btn:hover { background: rgba(0, 0, 0, 0.8); }
+.clip-fullscreen-btn svg { width: 20px; height: 20px; }
 
 /* One row with two groups: a "Set" button plus the time it captured. */
 .upload-clip-controls {
@@ -450,6 +720,7 @@ video { background: #000; border-radius: 8px; }
   gap: 24px;
   flex-wrap: wrap;
   align-items: center;
+  justify-content: center;
 }
 .upload-clip-controls__group {
   display: flex;
@@ -470,8 +741,8 @@ video { background: #000; border-radius: 8px; }
   font-variant-numeric: tabular-nums;
   text-align: center;
   color: var(--text);
-  background: var(--pico-form-element-background-color, #0d1016);
-  border: 1px solid #2b3242;
+  background: var(--pico-form-element-background-color, var(--input-bg));
+  border: 1px solid var(--input-border);
   border-radius: 6px;
 }
 .upload-clip-controls__time:focus {
@@ -534,8 +805,8 @@ button:disabled { opacity: 0.55; cursor: not-allowed; filter: none; }
   cursor: pointer;
 }
 .btn:hover { filter: brightness(1.1); }
-.btn--ghost { background: #1e2533; color: var(--text); border: 1px solid #2a3242; }
-.btn--ghost:hover { background: #252f40; }
+.btn--ghost { background: var(--btn-ghost-bg); color: var(--text); border: 1px solid var(--input-border); }
+.btn--ghost:hover { background: var(--btn-ghost-hover); }
 .btn--danger { background: #7f2a33; }
 .btn--danger:hover { background: #96333f; }
 .btn--sm { padding: 5px 12px; font-size: 0.8rem; }
@@ -546,7 +817,7 @@ button:disabled { opacity: 0.55; cursor: not-allowed; filter: none; }
   font-weight: 600;
   padding: 2px 9px;
   border-radius: 999px;
-  background: #232b3a;
+  background: var(--active);
   color: var(--muted);
 }
 .badge--admin { background: #33264d; color: #c9b3ff; }
@@ -558,7 +829,7 @@ button:disabled { opacity: 0.55; cursor: not-allowed; filter: none; }
 .progress {
   flex: 1 1 auto;
   height: 8px;
-  background: #222a38;
+  background: var(--bar-bg);
   border-radius: 6px;
   overflow: hidden;
 }
@@ -731,7 +1002,7 @@ button:disabled { opacity: 0.55; cursor: not-allowed; filter: none; }
 }
 .kaomoji-bar__btn {
   background: transparent;
-  border: 1px solid #2a3242;
+  border: 1px solid var(--input-border);
   color: var(--text);
   border-radius: 6px;
   padding: 2px 8px;
@@ -740,7 +1011,7 @@ button:disabled { opacity: 0.55; cursor: not-allowed; filter: none; }
   cursor: pointer;
   font-family: inherit;
 }
-.kaomoji-bar__btn:hover { background: #232b3a; }
+.kaomoji-bar__btn:hover { background: var(--active); }
 
 .comments__list {
   list-style: none;
@@ -800,7 +1071,7 @@ button:disabled { opacity: 0.55; cursor: not-allowed; filter: none; }
 }
 .comment--reply {
   padding: 8px 12px;
-  background: #1a2130;
+  background: var(--panel-2);
 }
 .comment--reply .comment__avatar {
   width: 28px;

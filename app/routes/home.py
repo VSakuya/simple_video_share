@@ -15,18 +15,58 @@ logger = logging.getLogger("simple_video_share.routes.home")
 @home_bp.route("/")
 @login_required
 def index() -> Any:
-    videos = db.list_public_videos()
+    videos = db.list_folder_videos(None)
     videos = _drop_missing(videos, current_app.config["VIDEOS_DIR"])
+    return _render_gallery(
+        videos=videos,
+        subfolders=db.list_root_folders(),
+        current_folder=None,
+        breadcrumbs=[],
+    )
+
+
+@home_bp.route("/folder/<int:folder_id>")
+@login_required
+def folder(folder_id: int) -> Any:
+    from flask import abort
+    current_folder = db.get_folder(folder_id)
+    if current_folder is None:
+        abort(404)
+    videos = db.list_folder_videos(folder_id)
+    videos = _drop_missing(videos, current_app.config["VIDEOS_DIR"])
+    return _render_gallery(
+        videos=videos,
+        subfolders=db.list_child_folders(folder_id),
+        current_folder=current_folder,
+        breadcrumbs=_breadcrumbs(current_folder),
+    )
+
+
+def _render_gallery(**kwargs: Any) -> Any:
     base_dir = os.path.dirname(str(current_app.config["VIDEOS_DIR"]))
     local_free = storage.free_space_bytes(base_dir)
     quota = drive.get_drive_quota()
     drive_free = quota[2] if quota is not None else None
     return render_template(
         "home.html",
-        videos=videos,
         local_free_bytes=local_free,
         drive_free_bytes=drive_free,
+        **kwargs,
     )
+
+
+def _breadcrumbs(folder: dict[str, Any]) -> list[dict[str, Any]]:
+    """Folders from Root down to (and including) ``folder``."""
+    crumbs: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    cur = folder
+    while cur is not None and cur["id"] not in seen:
+        seen.add(cur["id"])
+        crumbs.append(cur)
+        pid = cur.get("parent_id")
+        cur = db.get_folder(pid) if pid is not None else None
+    crumbs.reverse()
+    return crumbs
 
 
 @home_bp.route("/covers/<path:filename>")

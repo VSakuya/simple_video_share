@@ -1,7 +1,20 @@
 {% extends "base.html" %}
-{% block title %}Home — Simple Video Share{% endblock %}
+{% block title %}{{ current_folder['name'] if current_folder else 'Home' }} — Simple Video Share{% endblock %}
 {% block content %}
-<h1>All videos</h1>
+{% if breadcrumbs %}
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  <a href="{{ url_for('home.index') }}">Root</a>
+  {% for crumb in breadcrumbs %}
+  <span class="breadcrumb__sep">/</span>
+  {% if loop.last %}
+  <span class="breadcrumb__current">{{ crumb['name'] }}</span>
+  {% else %}
+  <a href="{{ url_for('home.folder', folder_id=crumb['id']) }}">{{ crumb['name'] }}</a>
+  {% endif %}
+  {% endfor %}
+</nav>
+{% endif %}
+<h1>{{ current_folder['name'] if current_folder else 'All videos' }}</h1>
 <p class="muted">
   Free space — local: {{ local_free_bytes | human_size }}
   {% if drive_free_bytes is not none %}
@@ -10,6 +23,16 @@
     | Drive: unknown
   {% endif %}
 </p>
+{% if subfolders %}
+<div class="folders">
+  {% for sf in subfolders %}
+  <a class="folder-card" href="{{ url_for('home.folder', folder_id=sf['id']) }}">
+    <span class="folder-card__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>
+    <span class="folder-card__name">{{ sf['name'] }}</span>
+  </a>
+  {% endfor %}
+</div>
+{% endif %}
 <div class="waterfall" id="waterfall">
   {% for video in videos %}
   <a class="card" href="{{ url_for('watch.page', video_id=video['id']) }}">
@@ -25,7 +48,7 @@
     </div>
   </a>
   {% else %}
-  <p class="muted">No videos yet.</p>
+  <p class="muted">No videos{% if current_folder %} in this folder{% endif %} yet.</p>
   {% endfor %}
 </div>
 {% endblock %}
