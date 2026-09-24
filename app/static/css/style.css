@@ -690,20 +690,20 @@ button:disabled { opacity: 0.55; cursor: not-allowed; filter: none; }
 .video-author {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 14px;
   margin: 12px 0 0;
-  padding: 10px 14px;
+  padding: 14px 16px;
   background: var(--panel);
   border-radius: 10px;
 }
 .video-author__avatar {
-  width: 36px;
-  height: 36px;
+  width: 56px;
+  height: 56px;
   border-radius: 50%;
   object-fit: cover;
   flex: 0 0 auto;
 }
-.video-author__name { font-weight: 600; }
+.video-author__name { font-size: 1.25rem; font-weight: 600; }
 
 /* ===== Comments (watch page, §13.16) ===== */
 .comments {
