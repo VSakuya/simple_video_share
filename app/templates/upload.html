@@ -43,24 +43,20 @@
     </div>
   </div>
 
-  <!-- Preview + clip timeline (shown after file selected) -->
+  <!-- Preview + clip (shown after file selected) -->
   <div id="clip-panel" class="upload-section hidden">
     <label class="upload-label">Preview &amp; clip</label>
     <div class="upload-timeline">
       <video id="preview-video" class="upload-timeline__video" controls playsinline></video>
-      <div id="timeline-strip" class="upload-timeline__strip">
-        <div id="timeline-thumbs" class="upload-timeline__thumbs"></div>
-        <div id="clip-dim-left" class="upload-timeline__dim"></div>
-        <div id="clip-dim-right" class="upload-timeline__dim"></div>
-        <div id="clip-start-handle" class="upload-timeline__handle" title="Drag to set start"></div>
-        <div id="clip-end-handle" class="upload-timeline__handle" title="Drag to set end"></div>
-      </div>
-      <div class="upload-timeline__info">
-        <span class="muted">Selected clip</span>
-        <span id="clip-start-label">0:00</span>
-        <span class="muted">&rarr;</span>
-        <span id="clip-end-label">0:00</span>
-        <span class="muted">(&nbsp;<span id="clip-duration-label">0:00</span>&nbsp;)</span>
+      <div class="upload-clip-controls">
+        <div class="upload-clip-controls__group">
+          <button type="button" id="set-start-btn" class="upload-clip-controls__btn">Set Start</button>
+          <input type="text" id="clip-start-input" class="upload-clip-controls__time" value="0:00" autocomplete="off" spellcheck="false" aria-label="Clip start time (minutes:seconds)">
+        </div>
+        <div class="upload-clip-controls__group">
+          <button type="button" id="set-end-btn" class="upload-clip-controls__btn">Set End</button>
+          <input type="text" id="clip-end-input" class="upload-clip-controls__time" value="0:00" autocomplete="off" spellcheck="false" aria-label="Clip end time (minutes:seconds)">
+        </div>
       </div>
     </div>
     <input type="hidden" id="clip-start" value="00:00">

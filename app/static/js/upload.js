@@ -43,7 +43,6 @@ const dropZone = $("drop-zone");
 const fileInput = $("file-input");
 const clipPanel = $("clip-panel");
 const previewVideo = $("preview-video");
-const timelineStrip = $("timeline-strip");
 const progressPanel = $("progress-panel");
 const progressFill = $("progress-fill");
 const progressStatus = $("progress-status");
@@ -160,9 +159,9 @@ function handleFiles(files) {
         (info.bitrateKbps || 0) + " kbps"
     );
     clipPanel.classList.remove("hidden");
+    $("clip-start").value = formatTime(0);
     $("clip-end").value = formatTime(info.duration);
     setupTimeline(file);
-    generateThumbnails().catch((e) => clientLog("warn", "thumbnail generation: " + e));
     const big = file.size > 2 * 1024 * 1024 * 1024;
     if (big) {
       progressStatus.textContent =
@@ -880,14 +879,12 @@ function extractCoverWithHtml5() {
 }
 
 // ---------------------------------------------------------------------------
-// Timeline preview + clip (QuickSplit-style)
+// Preview + clip (Set Start / Set End buttons)
 // ---------------------------------------------------------------------------
 
-const THUMB_W = 160; // canvas capture width (16:9)
-const THUMB_H = 90; // canvas capture height (16:9)
-const MIN_CLIP_SECONDS = 1; // keep the handles from collapsing onto each other
-let thumbGenId = 0; // guards against a stale generation (rapid file changes)
-
+// The clip range lives in the hidden #clip-start / #clip-end inputs; clipRange()
+// reads them. These helpers keep the on-screen time fields in sync with the
+// hidden inputs (and push manual edits back into them).
 function currentClipStart() {
   const t = parseTime($("clip-start").value);
   return Number.isFinite(t) ? t : 0;
@@ -898,138 +895,38 @@ function currentClipEnd() {
   return Number.isFinite(t) && t > 0 ? t : timelineDuration || 0;
 }
 
-// Position the handles + dim overlay + labels from the clip start/end inputs.
-function updateTimeline() {
-  const dur = timelineDuration;
-  if (!dur || dur <= 0) return;
-  const start = currentClipStart();
-  const end = currentClipEnd();
-  const startPct = (start / dur) * 100;
-  const endPct = (end / dur) * 100;
-
-  $("clip-start-handle").style.left = startPct + "%";
-  $("clip-end-handle").style.left = endPct + "%";
-  // Dim the unselected regions (before start, after end); the clip stays bright.
-  $("clip-dim-left").style.left = "0%";
-  $("clip-dim-left").style.width = startPct + "%";
-  $("clip-dim-right").style.left = endPct + "%";
-  $("clip-dim-right").style.width = Math.max(0, 100 - endPct) + "%";
-
-  $("clip-start-label").textContent = formatTime(start);
-  $("clip-end-label").textContent = formatTime(end);
-  $("clip-duration-label").textContent = formatTime(Math.max(0, end - start));
+// Reflect the hidden clip inputs in the editable time fields next to the two
+// buttons. Programmatic .value writes do not fire "change", so this is safe.
+function updateClipLabels() {
+  $("clip-start-input").value = formatTime(currentClipStart());
+  $("clip-end-input").value = formatTime(currentClipEnd());
 }
 
-// Seek a <video> to `t` seconds and resolve when the seek completes.
-function seekTo(video, t) {
-  return new Promise((resolve) => {
-    if (Math.abs(video.currentTime - t) < 0.01) {
-      resolve();
-      return;
-    }
-    const onSeeked = () => {
-      video.removeEventListener("seeked", onSeeked);
-      resolve();
-    };
-    video.addEventListener("seeked", onSeeked);
-    video.currentTime = t;
-  });
+// Commit a manually edited time field into its hidden input, then re-sync both
+// fields. A valid entry is normalized (e.g. "90" -> "1:30"); an invalid entry
+// is reverted to the last valid value.
+function onTimeInputChanged(fieldId, hiddenId) {
+  const t = parseTime($(fieldId).value);
+  if (Number.isFinite(t) && t >= 0) $(hiddenId).value = formatTime(t);
+  updateClipLabels();
 }
 
-// Sample the source at ~1 frame / 15s (capped at 36) and build the strip.
-async function generateThumbnails() {
-  const dur = timelineDuration;
-  if (!dur || dur <= 0) return;
-  const id = ++thumbGenId;
-  const thumbsWrap = $("timeline-thumbs");
-  thumbsWrap.innerHTML = "";
-
-  const count = Math.min(36, Math.max(1, Math.round(dur / 15)));
-  const canvas = document.createElement("canvas");
-  canvas.width = THUMB_W;
-  canvas.height = THUMB_H;
-  const ctx = canvas.getContext("2d");
-
-  // A separate hidden <video> reuses the preview's object URL (no extra copy).
-  const v = document.createElement("video");
-  v.preload = "auto";
-  v.muted = true;
-  v.src = videoUrl;
-  await new Promise((resolve, reject) => {
-    v.onloadeddata = resolve;
-    v.onerror = () => reject(new Error("thumbnail video load failed"));
-  });
-  if (id !== thumbGenId) return; // stale: the user picked a new file meanwhile
-
-  for (let i = 0; i < count; i++) {
-    if (id !== thumbGenId) return; // stale: abort this generation
-    const t = Math.min(dur - 0.05, ((i + 0.5) / count) * dur);
-    await seekTo(v, t);
-    ctx.drawImage(v, 0, 0, THUMB_W, THUMB_H);
-    const blob = await new Promise((res) =>
-      canvas.toBlob((b) => res(b), "image/jpeg", 0.6)
-    );
-    if (id !== thumbGenId) return; // stale: abort before appending
-    const img = document.createElement("img");
-    img.src = URL.createObjectURL(blob);
-    img.alt = "";
-    thumbsWrap.appendChild(img);
-  }
-
-  v.removeAttribute("src");
-  v.load(); // release the thumbnail <video>'s decoded resources
-  updateTimeline();
-}
-
-// Convert a pointer x-position on the timeline strip to a time in seconds.
-function pointerToTime(clientX) {
-  const rect = timelineStrip.getBoundingClientRect();
-  if (rect.width <= 0) return 0;
-  const frac = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
-  return frac * timelineDuration;
-}
-
-// Wire a handle so dragging it updates the matching clip-start / clip-end input.
-function setupHandleDrag(handle, isStart) {
-  handle.addEventListener("pointerdown", (e) => {
-    e.preventDefault();
-    handle.setPointerCapture(e.pointerId);
-    const onMove = (ev) => {
-      const dur = timelineDuration;
-      if (!dur || dur <= 0) return;
-      let t = pointerToTime(ev.clientX);
-      if (isStart) {
-        const end = currentClipEnd();
-        t = Math.min(t, Math.max(0, end - MIN_CLIP_SECONDS));
-        $("clip-start").value = formatTime(t);
-      } else {
-        const start = currentClipStart();
-        t = Math.min(Math.max(t, start + MIN_CLIP_SECONDS), dur);
-        $("clip-end").value = formatTime(t);
-      }
-      updateTimeline();
-    };
-    const onUp = () => {
-      handle.removeEventListener("pointermove", onMove);
-      handle.removeEventListener("pointerup", onUp);
-      handle.removeEventListener("pointercancel", onUp);
-    };
-    handle.addEventListener("pointermove", onMove);
-    handle.addEventListener("pointerup", onUp);
-    handle.addEventListener("pointercancel", onUp);
-  });
-}
-
-// The timeline elements live for the whole page, so these listeners attach
-// exactly once at module scope (re-selecting a file only re-points the src).
-setupHandleDrag($("clip-start-handle"), true);
-setupHandleDrag($("clip-end-handle"), false);
-timelineStrip.addEventListener("click", (e) => {
-  if (e.target.classList.contains("upload-timeline__handle")) return;
-  const dur = timelineDuration;
-  if (!dur || dur <= 0) return;
-  previewVideo.currentTime = pointerToTime(e.clientX);
+// Set Start / Set End capture the preview's current time when pressed. These
+// buttons live for the whole page, so the listeners attach exactly once at
+// module scope (re-selecting a file only re-points the preview src).
+$("set-start-btn").addEventListener("click", () => {
+  $("clip-start").value = formatTime(previewVideo.currentTime || 0);
+  updateClipLabels();
 });
+$("set-end-btn").addEventListener("click", () => {
+  $("clip-end").value = formatTime(previewVideo.currentTime || 0);
+  updateClipLabels();
+});
+// The time fields are editable: committing a manual edit updates the hidden
+// source of truth that clipRange() reads.
+$("clip-start-input").addEventListener("change", () => onTimeInputChanged("clip-start-input", "clip-start"));
+$("clip-end-input").addEventListener("change", () => onTimeInputChanged("clip-end-input", "clip-end"));
+// Stop the preview at the set end so the user can confirm the cut point.
 previewVideo.addEventListener("timeupdate", () => {
   const end = currentClipEnd();
   if (end > 0 && previewVideo.currentTime >= end) previewVideo.pause();
@@ -1041,8 +938,8 @@ function setupTimeline(file) {
   videoUrl = URL.createObjectURL(file);
   previewVideo.src = videoUrl;
   // No forced mute: the user can play the preview with sound (§13.11). The
-  // hidden probe/thumbnail/cover <video> elements stay muted.
-  updateTimeline();
+  // hidden probe/cover <video> elements stay muted.
+  updateClipLabels();
 }
 
 // ---------------------------------------------------------------------------
@@ -1200,7 +1097,13 @@ function formatTime(sec) {
 
 function parseTime(str) {
   if (!str) return NaN;
-  const parts = str.trim().split(":").map((x) => parseInt(x, 10));
+  const trimmed = str.trim();
+  // A bare number is treated as seconds (e.g. "90" -> 1:30); handy for manual entry.
+  if (!trimmed.includes(":")) {
+    const sec = Number(trimmed);
+    return Number.isFinite(sec) ? sec : NaN;
+  }
+  const parts = trimmed.split(":").map((x) => parseInt(x, 10));
   if (parts.length === 2) return parts[0] * 60 + parts[1];
   if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
   return NaN;
