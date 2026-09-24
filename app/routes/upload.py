@@ -105,6 +105,9 @@ def submit() -> Any:
     if video_file is None:
         return _fail("No video file received.")
 
+    if not _folder_ok(me["id"], bool(me.get("is_admin")), folder_id):
+        return _fail("Unknown folder.")
+
     videos_dir = current_app.config["VIDEOS_DIR"]
     covers_dir = current_app.config["COVERS_DIR"]
     base_dir = str(os.path.dirname(str(videos_dir)))
@@ -161,6 +164,8 @@ def seg_start() -> Any:
     total_parts = _optional_int(request.form.get("total_parts")) or 0
     expected_size = _optional_int(request.form.get("expected_size")) or 0
     folder_id = _optional_int(request.form.get("folder_id"))
+    if not _folder_ok(me["id"], bool(me.get("is_admin")), folder_id):
+        return jsonify(ok=False, error="Unknown folder."), 400
     if total_parts <= 0:
         return jsonify(ok=False, error="total_parts is required"), 400
 
@@ -356,6 +361,14 @@ def _optional_int(value: str | None) -> int | None:
         return int(value) if value not in (None, "") else None
     except (TypeError, ValueError):
         return None
+
+
+def _folder_ok(owner_id: int, is_admin: bool, folder_id: int | None) -> bool:
+    """True when ``folder_id`` is Root (None) or one of the owner's folders."""
+    if folder_id is None:
+        return True
+    folder = db.get_folder(folder_id)
+    return folder is not None and (folder["owner_id"] == owner_id or is_admin)
 
 
 def _optional_float(value: str | None) -> float | None:

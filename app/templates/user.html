@@ -8,18 +8,23 @@
     <h2>Folders</h2>
     <ul id="folder-list">
       {% for folder in folders %}
-      <li>
-        {{ folder['name'] }}
-        <button data-folder-id="{{ folder['id'] }}" class="btn-rename">Rename</button>
-        <button data-folder-id="{{ folder['id'] }}" class="btn-delete">Delete</button>
+      <li class="folder-row">
+        <form method="post" action="{{ url_for('user.rename_folder', folder_id=folder['id']) }}" class="folder-rename">
+          <input type="text" name="name" value="{{ folder['name'] }}" required>
+          <button type="submit" class="btn btn--ghost btn--sm">Rename</button>
+        </form>
+        <form method="post" action="{{ url_for('user.delete_folder', folder_id=folder['id']) }}"
+              data-confirm="Delete folder '{{ folder['name'] }}'? Its videos move to Root.">
+          <button type="submit" class="btn btn--danger btn--sm">Delete</button>
+        </form>
       </li>
       {% else %}
       <li class="muted">No folders.</li>
       {% endfor %}
     </ul>
-    <form id="folder-form">
-      <input type="text" id="folder-name" placeholder="New folder name" required>
-      <button type="submit">Create folder</button>
+    <form method="post" action="{{ url_for('user.create_folder') }}" class="folder-create">
+      <input type="text" name="name" placeholder="New folder name" required>
+      <button type="submit" class="btn btn--sm">Create folder</button>
     </form>
   </section>
 
@@ -32,7 +37,16 @@
         {% for video in videos %}
         <tr>
           <td><a class="row-title" href="{{ url_for('watch.page', video_id=video['id']) }}">{{ video['title'] }}</a></td>
-          <td>{{ video['folder_name'] or '—' }}</td>
+          <td>
+            <form method="post" action="{{ url_for('user.move_video', video_id=video['id']) }}" class="folder-move">
+              <select name="folder_id" class="folder-move__select" onchange="this.form.submit()">
+                <option value="">Root</option>
+                {% for f in folders %}
+                <option value="{{ f['id'] }}" {% if video['folder_id'] == f['id'] %}selected{% endif %}>{{ f['name'] }}</option>
+                {% endfor %}
+              </select>
+            </form>
+          </td>
           <td>{{ video['size_bytes'] | human_size }}</td>
           <td class="status-cell">
             {% if video['status'] == 'uploading' %}
@@ -100,8 +114,22 @@
       </form>
     </article>
   </dialog>
+
+  <!-- Cover crop dialog for the edit form (Cropper.js, §13.21). -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='vendor/cropper.min.css') }}">
+  <dialog id="cover-crop-dialog" class="crop-dialog">
+    <article class="dialog-card">
+      <h2>Crop cover</h2>
+      <img id="cover-crop-image" alt="cover crop">
+      <div class="dialog-actions">
+        <button type="button" class="btn" id="cover-crop-apply">Crop</button>
+        <button type="button" class="btn btn--ghost" id="cover-crop-cancel">Cancel</button>
+      </div>
+    </article>
+  </dialog>
 </div>
 
+<script src="{{ url_for('static', filename='vendor/cropper.min.js') }}"></script>
 <script>
 (function () {
   var dialog = document.getElementById('edit-dialog');
@@ -111,6 +139,11 @@
   var coverInput = document.getElementById('edit-cover-input');
   var coverBtn = document.getElementById('edit-cover-btn');
   var coverPreview = document.getElementById('edit-cover');
+  var cropDialog = document.getElementById('cover-crop-dialog');
+  var cropImage = document.getElementById('cover-crop-image');
+  var cropApply = document.getElementById('cover-crop-apply');
+  var cropCancel = document.getElementById('cover-crop-cancel');
+  var cropper = null;
 
   document.querySelectorAll('.btn-edit').forEach(function (btn) {
     btn.addEventListener('click', function () {
@@ -124,11 +157,62 @@
   });
 
   coverBtn.addEventListener('click', function () { coverInput.click(); });
+
+  // Crop a chosen cover to 16:9 / 1280x720 before it is attached to the form
+  // (same pattern as the avatar crop, §13.21).
   coverInput.addEventListener('change', function () {
     var file = coverInput.files && coverInput.files[0];
-    if (file) {
-      coverPreview.src = URL.createObjectURL(file);
-    }
+    if (!file) return;
+    var url = URL.createObjectURL(file);
+    var probe = new Image();
+    probe.onload = function () {
+      cropDialog.showModal();
+      var card = cropDialog.querySelector('.dialog-card');
+      var availW = card.clientWidth - 40;
+      var availH = Math.round(window.innerHeight * 0.6);
+      var w = probe.naturalWidth || 1, h = probe.naturalHeight || 1;
+      var scale = Math.min(1, availW / w, availH / h);
+      var src;
+      if (scale < 1) {
+        var c = document.createElement('canvas');
+        c.width = Math.round(w * scale);
+        c.height = Math.round(h * scale);
+        c.getContext('2d').drawImage(probe, 0, 0, c.width, c.height);
+        src = c.toDataURL('image/png');
+        URL.revokeObjectURL(url);
+      } else {
+        src = url;
+      }
+      cropImage.onload = function () {
+        if (cropper) cropper.destroy();
+        cropper = new Cropper(cropImage, {
+          aspectRatio: 16 / 9,
+          background: true,
+          autoCropArea: 0.8
+        });
+      };
+      cropImage.src = src;
+    };
+    probe.src = url;
+  });
+
+  cropApply.addEventListener('click', function () {
+    if (!cropper) return;
+    var canvas = cropper.getCroppedCanvas({ width: 1280, height: 720, imageSmoothingQuality: 'high' });
+    canvas.toBlob(function (blob) {
+      if (!blob) return;
+      var f = new File([blob], 'cover.jpg', { type: 'image/jpeg' });
+      var dt = new DataTransfer();
+      dt.items.add(f);
+      coverInput.files = dt.files;
+      coverPreview.src = URL.createObjectURL(blob);
+      cropDialog.close();
+    }, 'image/jpeg');
+  });
+
+  cropCancel.addEventListener('click', function () {
+    cropDialog.close();
+    coverInput.value = '';
   });
 
   document.getElementById('edit-cancel').addEventListener('click', function () {

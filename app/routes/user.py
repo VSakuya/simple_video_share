@@ -135,6 +135,103 @@ def edit_video(video_id: int) -> Any:
     return redirect(url_for("user.index"))
 
 
+# ---------------------------------------------------------------------------
+# Folders (owner-scoped; an admin may act on any)
+# ---------------------------------------------------------------------------
+
+@user_bp.route("/folders", methods=["POST"])
+@login_required
+def create_folder() -> Any:
+    me = current_user()
+    assert me is not None
+    name = (request.form.get("name") or "").strip()
+    if not name:
+        if _is_ajax():
+            return jsonify(ok=False, error="Folder name is required."), 400
+        flash("Folder name is required.", "error")
+        return redirect(url_for("user.index"))
+    folder_id = db.create_folder(name, me["id"])
+    if _is_ajax():
+        return jsonify(ok=True, folder_id=folder_id)
+    flash("Folder created.", "success")
+    return redirect(url_for("user.index"))
+
+
+@user_bp.route("/folders/<int:folder_id>/rename", methods=["POST"])
+@login_required
+def rename_folder(folder_id: int) -> Any:
+    me = current_user()
+    assert me is not None
+    folder = db.get_folder(folder_id)
+    if folder is None:
+        flash("Folder not found.", "error")
+        return redirect(url_for("user.index"))
+    if folder["owner_id"] != me["id"] and not me.get("is_admin"):
+        flash("You can only rename your own folders.", "error")
+        return redirect(url_for("user.index"))
+    name = (request.form.get("name") or "").strip()
+    if not name:
+        flash("Folder name is required.", "error")
+        return redirect(url_for("user.index"))
+    db.rename_folder(folder_id, name)
+    flash("Folder renamed.", "success")
+    return redirect(url_for("user.index"))
+
+
+@user_bp.route("/folders/<int:folder_id>/delete", methods=["POST"])
+@login_required
+def delete_folder(folder_id: int) -> Any:
+    me = current_user()
+    assert me is not None
+    folder = db.get_folder(folder_id)
+    if folder is None:
+        flash("Folder not found.", "error")
+        return redirect(url_for("user.index"))
+    if folder["owner_id"] != me["id"] and not me.get("is_admin"):
+        flash("You can only delete your own folders.", "error")
+        return redirect(url_for("user.index"))
+    # The FK's ON DELETE SET NULL sends the folder's videos back to Root.
+    db.delete_folder(folder_id)
+    flash("Folder deleted (its videos moved to Root).", "success")
+    return redirect(url_for("user.index"))
+
+
+@user_bp.route("/videos/<int:video_id>/move", methods=["POST"])
+@login_required
+def move_video(video_id: int) -> Any:
+    me = current_user()
+    assert me is not None
+    video = db.get_video_by_id(video_id)
+    if video is None:
+        flash("Video not found.", "error")
+        return redirect(url_for("user.index"))
+    if video["owner_id"] != me["id"] and not me.get("is_admin"):
+        flash("You can only move your own videos.", "error")
+        return redirect(url_for("user.index"))
+    folder_id = _optional_int(request.form.get("folder_id"))
+    if folder_id is not None:
+        folder = db.get_folder(folder_id)
+        if folder is None or (
+            folder["owner_id"] != me["id"] and not me.get("is_admin")
+        ):
+            flash("That folder does not exist.", "error")
+            return redirect(url_for("user.index"))
+    db.update_video(video_id, folder_id=folder_id)  # None => Root
+    flash("Video moved.", "success")
+    return redirect(url_for("user.index"))
+
+
+def _is_ajax() -> bool:
+    return request.headers.get("X-Requested-With") == "XMLHttpRequest"
+
+
+def _optional_int(value: str | None) -> int | None:
+    try:
+        return int(value) if value not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
+
+
 def _purge_video_files(video: dict[str, Any]) -> None:
     """Best-effort removal of a video's files before dropping its DB row.
 

@@ -11,7 +11,8 @@
 {% endif %}
 
 {% if video['duration'] is not none or video['resolution'] or video['codec']
-      or video['bitrate'] is not none or video['fps'] is not none or video['size_bytes'] %}
+      or video['bitrate'] is not none or video['fps'] is not none or video['size_bytes']
+      or video['drive_filename'] %}
 <dl class="video-meta">
   {% if video['duration'] is not none %}
   <div class="video-meta__item"><dt>Duration</dt><dd>{{ video['duration'] | human_duration }}</dd></div>
@@ -30,6 +31,9 @@
   {% endif %}
   {% if video['size_bytes'] %}
   <div class="video-meta__item"><dt>File size</dt><dd>{{ video['size_bytes'] | human_size }}</dd></div>
+  {% endif %}
+  {% if video['drive_filename'] %}
+  <div class="video-meta__item"><dt>Drive file name</dt><dd class="mono">{{ video['drive_filename'] }}</dd></div>
   {% endif %}
 </dl>
 {% endif %}

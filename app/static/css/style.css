@@ -691,6 +691,12 @@ button:disabled { opacity: 0.55; cursor: not-allowed; filter: none; }
   margin: 0;
   overflow-wrap: anywhere;
 }
+/* Monospace value (used for the Drive filename, which is a long hash). */
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 0.85rem;
+  font-weight: 400;
+}
 
 /* Free-text video description (watch page). */
 .video-description {
@@ -805,4 +811,51 @@ button:disabled { opacity: 0.55; cursor: not-allowed; filter: none; }
 .comment--reply .comment__avatar {
   width: 28px;
   height: 28px;
+}
+
+/* ===== Folders (§13.21) ===== */
+/* My Videos: one row per folder — an inline rename form + a delete form. */
+#folder-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 12px;
+}
+.folder-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.folder-row .folder-rename {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+}
+.folder-row .folder-rename input {
+  flex: 1;
+}
+.folder-create {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.folder-create input {
+  flex: 1;
+}
+/* Pico forces width:100% on button[type=submit]; inside the flex folder forms
+   that makes the action button swallow the whole row. Keep it content-sized. */
+.folder-create .btn,
+.folder-rename .btn {
+  width: auto;
+  flex: 0 0 auto;
+}
+/* Per-row folder-move select in the My Videos table (auto-submits on change). */
+.folder-move {
+  display: inline-block;
+  margin: 0;
+}
+.folder-move__select {
+  font-size: 0.9em;
+  padding: 4px 6px;
 }

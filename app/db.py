@@ -290,6 +290,15 @@ def list_folders(owner_id: int) -> list[dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
+def get_folder(folder_id: int) -> Optional[dict[str, Any]]:
+    conn = get_db()
+    row = conn.execute(
+        "SELECT * FROM folders WHERE id = ?", (folder_id,)
+    ).fetchone()
+    conn.close()
+    return dict(row) if row is not None else None
+
+
 def rename_folder(folder_id: int, new_name: str) -> None:
     conn = get_db()
     conn.execute("UPDATE folders SET name = ? WHERE id = ?", (new_name, folder_id))

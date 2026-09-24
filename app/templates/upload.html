@@ -38,7 +38,7 @@
       <input type="file" id="cover-input" accept="image/*" hidden>
       <img id="cover-preview" class="hidden upload-cover__img" alt="cover preview">
       <button type="button" class="upload-cover__btn" onclick="document.getElementById('cover-input').click()">
-        Choose cover image
+        Choose &amp; crop cover
       </button>
     </div>
   </div>
@@ -85,8 +85,20 @@
     <div id="log-console" class="upload-log"></div>
   </div>
 
-  <!-- Folder (hidden input) -->
-  <input type="hidden" name="folder_id" id="folder-input" value="">
+  <!-- Folder: choose an existing one, or create a new one (JS resolves it) -->
+  <div class="upload-section">
+    <label for="folder-select" class="upload-label">Folder <span class="muted">(optional)</span></label>
+    <select id="folder-select" class="upload-input">
+      <option value="">Root</option>
+      {% for f in folders %}
+      <option value="{{ f['id'] }}">{{ f['name'] }}</option>
+      {% endfor %}
+      <option value="__new__">New folder…</option>
+    </select>
+    <input type="text" id="folder-new-name" class="upload-input hidden"
+           placeholder="New folder name">
+    <input type="hidden" name="folder_id" id="folder-input" value="">
+  </div>
 
   <!-- Submit -->
   <form id="upload-form" method="post" enctype="multipart/form-data"
@@ -120,6 +132,20 @@
     <button type="button" id="success-go" class="upload-success__btn">Go to My Videos</button>
   </div>
 </div>
+
+<!-- Cover crop dialog (Cropper.js, §13.21). -->
+<link rel="stylesheet" href="{{ url_for('static', filename='vendor/cropper.min.css') }}">
+<dialog id="cover-crop-dialog" class="crop-dialog">
+  <article class="dialog-card">
+    <h2>Crop cover</h2>
+    <img id="cover-crop-image" alt="cover crop">
+    <div class="dialog-actions">
+      <button type="button" class="btn" id="cover-crop-apply">Crop</button>
+      <button type="button" class="btn btn--ghost" id="cover-crop-cancel">Cancel</button>
+    </div>
+  </article>
+</dialog>
+<script src="{{ url_for('static', filename='vendor/cropper.min.js') }}"></script>
 
 <script type="module" src="{{ url_for('static', filename='js/upload.js') }}"></script>
 {% endblock %}

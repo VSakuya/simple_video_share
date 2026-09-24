@@ -50,6 +50,13 @@ const progressStatus = $("progress-status");
 const coverInput = $("cover-input");
 const coverPreview = $("cover-preview");
 const coverPanel = $("cover-panel");
+const coverCropDialog = $("cover-crop-dialog");
+const coverCropImage = $("cover-crop-image");
+const coverCropApply = $("cover-crop-apply");
+const coverCropCancel = $("cover-crop-cancel");
+let coverCropper = null;
+const folderSelect = $("folder-select");
+const folderNewName = $("folder-new-name");
 const uploadForm = $("upload-form");
 const titleInput = $("title-input");
 const descriptionInput = $("description-input");
@@ -190,12 +197,92 @@ uploadForm.addEventListener("submit", (e) => {
   void onUpload();
 });
 
+// A user-provided cover is cropped to 16:9 / 1280x720 in the browser before it
+// is used (§13.21). The dialog is shared with the avatar-crop pattern.
 function onCoverSelected() {
   const f = coverInput.files[0];
   if (!f) return;
-  coverBlob = f;
-  coverPreview.src = URL.createObjectURL(f);
-  coverPreview.classList.remove("hidden");
+  const url = URL.createObjectURL(f);
+  const probe = new Image();
+  probe.onload = () => {
+    coverCropDialog.showModal();
+    const card = coverCropDialog.querySelector(".dialog-card");
+    const availW = card.clientWidth - 40;
+    const availH = Math.round(window.innerHeight * 0.6);
+    const w = probe.naturalWidth || 1, h = probe.naturalHeight || 1;
+    const scale = Math.min(1, availW / w, availH / h);
+    let src;
+    if (scale < 1) {
+      const c = document.createElement("canvas");
+      c.width = Math.round(w * scale);
+      c.height = Math.round(h * scale);
+      c.getContext("2d").drawImage(probe, 0, 0, c.width, c.height);
+      src = c.toDataURL("image/png");
+      URL.revokeObjectURL(url);
+    } else {
+      src = url;
+    }
+    coverCropImage.onload = () => {
+      if (coverCropper) coverCropper.destroy();
+      coverCropper = new Cropper(coverCropImage, {
+        aspectRatio: 16 / 9,
+        background: true,
+        autoCropArea: 0.8,
+      });
+    };
+    coverCropImage.src = src;
+  };
+  probe.src = url;
+}
+
+coverCropApply.addEventListener("click", () => {
+  if (!coverCropper) return;
+  const canvas = coverCropper.getCroppedCanvas({ width: 1280, height: 720, imageSmoothingQuality: "high" });
+  canvas.toBlob((blob) => {
+    if (!blob) return;
+    coverBlob = blob;
+    coverPreview.src = URL.createObjectURL(blob);
+    coverPreview.classList.remove("hidden");
+    coverCropDialog.close();
+  }, "image/jpeg");
+});
+
+coverCropCancel.addEventListener("click", () => {
+  coverCropDialog.close();
+  coverInput.value = ""; // no user cover -> the pipeline auto-extracts the 60s frame
+  coverBlob = null;
+  coverPreview.classList.add("hidden");
+});
+
+// Reveal the inline name field when "New folder…" is chosen.
+folderSelect.addEventListener("change", () => {
+  folderNewName.classList.toggle("hidden", folderSelect.value !== "__new__");
+});
+
+// Resolve the folder selection into the hidden `folder-input` before upload.
+// "New folder…" is created server-side first (JSON) and its id is used.
+async function resolveFolder() {
+  const val = folderSelect.value;
+  if (val === "__new__") {
+    const name = folderNewName.value.trim();
+    if (!name) {
+      folderNewName.focus();
+      throw new Error("Enter a name for the new folder");
+    }
+    const res = await fetch(SVS_BASE + "/user/folders", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "X-Requested-With": "XMLHttpRequest",
+      },
+      body: new URLSearchParams({ name }),
+    });
+    const j = await res.json();
+    if (!j || !j.ok) throw new Error((j && j.error) || "Could not create the folder");
+    folderInput.value = String(j.folder_id);
+  } else {
+    folderInput.value = val; // "" for Root, or a folder id
+  }
 }
 
 let processing = false; // guards against double-submit while the pipeline runs
@@ -210,6 +297,7 @@ function onUpload() {
   void (async () => {
     clientLog("info", "Upload pipeline started for " + sourceFile.name);
     try {
+      await resolveFolder();
       $("progress-speed").classList.add("hidden");
       setProgress(0, "Preparing…");
       processedBlob = await processVideo();
