@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}Account — Simple Video Share{% endblock %}
+{% block content %}
+<div class="page">
+  <h1>My account</h1>
+
+  <div class="panel-grid">
+    <section class="panel">
+      <h2>Avatar</h2>
+      <img id="avatar-preview" class="avatar-lg"
+           src="{{ url_for('home.avatar_file', filename=current_user_obj['avatar_filename']) if current_user_obj and current_user_obj['avatar_filename'] else url_for('static', filename='img/avatar-default.svg') }}"
+           alt="avatar">
+      <form method="post" action="{{ url_for('auth.avatar') }}" enctype="multipart/form-data" data-confirm="Upload this avatar?">
+        <div class="upload-section">
+          <label class="upload-label">Avatar image <span class="muted">(square, cropped in your browser)</span></label>
+          <div class="upload-cover">
+            <input id="avatar-input" type="file" name="avatar" accept="image/*" hidden>
+            <button type="button" id="avatar-choose" class="upload-cover__btn">Choose &amp; crop image</button>
+          </div>
+        </div>
+        <p class="muted" style="margin: 0 0 12px;">Square still images are cropped in your browser; GIF uploads keep their animation.</p>
+        <button type="submit" class="btn">Upload avatar</button>
+      </form>
+    </section>
+
+    <section class="panel">
+      <h2>Password</h2>
+      <form method="post" action="{{ url_for('auth.account') }}">
+        <div class="field">
+          <label for="account-current-password">Current password</label>
+          <input id="account-current-password" type="password" name="current_password" required>
+        </div>
+        <div class="field">
+          <label for="account-new-password">New password <span class="muted">(leave blank to keep)</span></label>
+          <input id="account-new-password" type="password" name="new_password" minlength="6">
+        </div>
+        <div class="field">
+          <label for="account-confirm">Confirm new password</label>
+          <input id="account-confirm" type="password" name="confirm">
+        </div>
+        <button type="submit" class="btn">Save changes</button>
+      </form>
+    </section>
+  </div>
+</div>
+
+<!-- Avatar crop dialog (Cropper.js, §13.15). -->
+<link rel="stylesheet" href="{{ url_for('static', filename='vendor/cropper.min.css') }}">
+<dialog id="avatar-crop-dialog" class="crop-dialog">
+  <article class="dialog-card">
+    <h2>Crop avatar</h2>
+    <img id="avatar-crop-image" alt="avatar crop">
+    <div class="dialog-actions">
+      <button type="button" class="btn" id="avatar-crop-apply">Crop</button>
+      <button type="button" class="btn btn--ghost" id="avatar-crop-cancel">Cancel</button>
+    </div>
+  </article>
+</dialog>
+<script src="{{ url_for('static', filename='vendor/cropper.min.js') }}"></script>
+<script>
+(function () {
+  var fileInput = document.getElementById('avatar-input');
+  var chooseBtn = document.getElementById('avatar-choose');
+  var preview = document.getElementById('avatar-preview');
+  var cropDialog = document.getElementById('avatar-crop-dialog');
+  var cropImage = document.getElementById('avatar-crop-image');
+  var applyBtn = document.getElementById('avatar-crop-apply');
+  var cancelBtn = document.getElementById('avatar-crop-cancel');
+  var cropper = null;
+  var previewUrl = null;
+
+  chooseBtn.addEventListener('click', function () { fileInput.click(); });
+
+  fileInput.addEventListener('change', function () {
+    var file = fileInput.files && fileInput.files[0];
+    if (!file) return;
+    if (file.type === 'image/gif') {
+      // Animated GIF: Cropper.js renders to a static canvas and would drop the
+      // animation, so upload the original file as-is.
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      previewUrl = URL.createObjectURL(file);
+      preview.src = previewUrl;
+      return;
+    }
+    // Still image: pre-scale so the Cropper container fits inside the card.
+    // Cropper sizes its container to the image's natural dimensions, so an
+    // oversized source overflows the card. Scaling to the card's content size
+    // keeps the container inside; with the 85vw card the pre-scaled source is
+    // ~860px, giving a 3.4:1 ratio over the 256px export (crisp output).
+    var url = URL.createObjectURL(file);
+    var probe = new Image();
+    probe.onload = function () {
+      cropDialog.showModal();
+      var card = cropDialog.querySelector('.dialog-card');
+      var availW = card.clientWidth - 40;
+      var availH = Math.round(window.innerHeight * 0.6);
+      var w = probe.naturalWidth || 1, h = probe.naturalHeight || 1;
+      var scale = Math.min(1, availW / w, availH / h);
+      var src;
+      if (scale < 1) {
+        var c = document.createElement('canvas');
+        c.width = Math.round(w * scale);
+        c.height = Math.round(h * scale);
+        c.getContext('2d').drawImage(probe, 0, 0, c.width, c.height);
+        src = c.toDataURL('image/png');
+        URL.revokeObjectURL(url);
+      } else {
+        src = url;
+      }
+      cropImage.onload = function () {
+        if (cropper) cropper.destroy();
+        cropper = new Cropper(cropImage, {
+          aspectRatio: 1,
+          background: true,
+          autoCropArea: 0.8
+        });
+      };
+      cropImage.src = src;
+    };
+    probe.src = url;
+  });
+
+  applyBtn.addEventListener('click', function () {
+    if (!cropper) return;
+    var canvas = cropper.getCroppedCanvas({ width: 256, height: 256, imageSmoothingQuality: 'high' });
+    canvas.toBlob(function (blob) {
+      if (!blob) return;
+      var file = new File([blob], 'avatar.jpg', { type: 'image/jpeg' });
+      var dt = new DataTransfer();
+      dt.items.add(file);
+      fileInput.files = dt.files;
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      previewUrl = URL.createObjectURL(blob);
+      preview.src = previewUrl;
+      cropDialog.close();
+    }, 'image/jpeg');
+  });
+
+  cancelBtn.addEventListener('click', function () {
+    cropDialog.close();
+    fileInput.value = '';
+  });
+})();
+</script>
+{% endblock %}

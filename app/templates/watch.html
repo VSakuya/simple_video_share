@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}{{ video['title'] }} — Simple Video Share{% endblock %}
+{% block content %}
+<h1>{{ video['title'] }}</h1>
+<div id="caching-status" class="hidden">Caching…</div>
+<video id="player" controls width="100%"
+       src="{{ url_for('watch.stream', video_id=video['id']) }}"></video>
+
+{% if video['description'] %}
+<div class="video-description">{{ video['description'] }}</div>
+{% endif %}
+
+{% if video['duration'] is not none or video['resolution'] or video['codec']
+      or video['bitrate'] is not none or video['fps'] is not none or video['size_bytes'] %}
+<dl class="video-meta">
+  {% if video['duration'] is not none %}
+  <div class="video-meta__item"><dt>Duration</dt><dd>{{ video['duration'] | human_duration }}</dd></div>
+  {% endif %}
+  {% if video['resolution'] %}
+  <div class="video-meta__item"><dt>Resolution</dt><dd>{{ video['resolution'] }}</dd></div>
+  {% endif %}
+  {% if video['codec'] %}
+  <div class="video-meta__item"><dt>Codec</dt><dd>{{ video['codec'] }}</dd></div>
+  {% endif %}
+  {% if video['bitrate'] is not none %}
+  <div class="video-meta__item"><dt>Bitrate</dt><dd>{{ video['bitrate'] | human_bitrate }}</dd></div>
+  {% endif %}
+  {% if video['fps'] is not none %}
+  <div class="video-meta__item"><dt>Frame rate</dt><dd>{{ video['fps'] | round(1) }} fps</dd></div>
+  {% endif %}
+  {% if video['size_bytes'] %}
+  <div class="video-meta__item"><dt>File size</dt><dd>{{ video['size_bytes'] | human_size }}</dd></div>
+  {% endif %}
+</dl>
+{% endif %}
+
+<!-- ===== Comments (§13.16: plain text + kaomoji) ===== -->
+<section class="comments">
+  <h2>Comments <span class="muted">({{ comments | length }})</span></h2>
+
+  <form method="post" action="{{ url_for('watch.add_comment', video_id=video['id']) }}"
+        class="comments__form">
+    <label for="comment-body" class="upload-label">Comment
+      <span class="muted">(plain text — kaomoji welcome)</span></label>
+    <div class="kaomoji-bar" id="kaomoji-bar">
+      <span class="kaomoji-bar__label">Insert:</span>
+      {% for kaomoji in kaomoji_set %}
+      <button type="button" class="kaomoji-bar__btn" data-kaomoji="{{ kaomoji }}">{{ kaomoji }}</button>
+      {% endfor %}
+    </div>
+    <textarea id="comment-body" name="body" rows="2" maxlength="{{ max_comment_length }}"
+              class="upload-input" required
+              placeholder="Say something… (≧▽≦)"></textarea>
+    <div class="dialog-actions">
+      <button type="submit" class="btn">Post comment</button>
+    </div>
+  </form>
+
+  <ul class="comments__list">
+    {% for c in comments %}
+    <li class="comment">
+      <img class="comment__avatar"
+           src="{{ url_for('home.avatar_file', filename=c['avatar_filename']) if c['avatar_filename'] else url_for('static', filename='img/avatar-default.svg') }}"
+           alt="">
+      <div class="comment__main">
+        <div class="comment__head">
+          <span class="comment__author">{{ c['username'] }}</span>
+          <span class="comment__time muted">{{ c['created_at'][:16] }} UTC</span>
+          {% if c['author_id'] == current_user_obj['id'] or user_is_admin %}
+          <form method="post"
+                action="{{ url_for('watch.delete_comment', video_id=video['id'], comment_id=c['id']) }}"
+                data-confirm="Delete this comment?">
+            <button type="submit" class="btn btn--ghost btn--sm comment__delete">Delete</button>
+          </form>
+          {% endif %}
+        </div>
+        <div class="comment__body">{{ c['body'] }}</div>
+      </div>
+    </li>
+    {% else %}
+    <li class="muted">No comments yet — be the first!</li>
+    {% endfor %}
+  </ul>
+</section>
+
+<script>
+// Kaomoji quick-insert: insert at the cursor position (no selection is replaced).
+(function () {
+  var textarea = document.getElementById('comment-body');
+  if (!textarea) return;
+  document.querySelectorAll('.kaomoji-bar__btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var s = btn.getAttribute('data-kaomoji');
+      var start = textarea.selectionStart || textarea.value.length;
+      var end = textarea.selectionEnd || textarea.value.length;
+      textarea.value = textarea.value.slice(0, start) + s + textarea.value.slice(end);
+      textarea.selectionStart = textarea.selectionEnd = start + s.length;
+      textarea.focus();
+    });
+  });
+})();
+</script>
+{% endblock %}

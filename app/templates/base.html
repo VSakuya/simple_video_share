@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="{{ url_for('static', filename='vendor/pico.min.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <title>{% block title %}Simple Video Share{% endblock %}</title>
+</head>
+<body>
+  <!-- Mobile top bar (hidden on desktop, where the sidebar is always visible) -->
+  <header class="topbar">
+    <button type="button" class="topbar__menu" id="sidebar-toggle"
+            aria-label="Toggle menu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/></svg></button>
+    <a class="brand" href="{{ url_for('home.index') }}">Simple Video Share</a>
+  </header>
+
+  <aside class="sidebar" id="sidebar">
+    <button type="button" class="sidebar__toggle" id="sidebar-collapse"
+            aria-label="Collapse sidebar" title="Collapse sidebar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/></svg></button>
+    <div class="sidebar__brand">
+      <a href="{{ url_for('home.index') }}">Simple Video Share</a>
+    </div>
+    <nav class="sidebar__nav">
+      <a class="sidebar__item{% if request.path == url_for('home.index') %} is-active{% endif %}"
+         href="{{ url_for('home.index') }}" title="Home">
+        <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg></span><span class="label">Home</span>
+      </a>
+      {% if session.user_id %}
+      <a class="sidebar__item{% if request.path.startswith('/upload') %} is-active{% endif %}"
+         href="{{ url_for('upload.index') }}" title="Upload">
+        <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></span><span class="label">Upload</span>
+      </a>
+      <a class="sidebar__item{% if request.path.startswith('/user') %} is-active{% endif %}"
+         href="{{ url_for('user.index') }}" title="My Videos">
+        <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg></span><span class="label">My Videos</span>
+      </a>
+      {% if user_is_admin %}
+      <a class="sidebar__item{% if request.path.startswith('/admin') %} is-active{% endif %}"
+         href="{{ url_for('admin.index') }}" title="Admin">
+        <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span><span class="label">Admin</span>
+      </a>
+      {% endif %}
+      {% else %}
+      <a class="sidebar__item" href="{{ url_for('auth.login') }}" title="Log in">
+        <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg></span><span class="label">Log in</span>
+      </a>
+      {% endif %}
+    </nav>
+    {% if session.user_id %}
+    <div class="sidebar__footer">
+      <a class="sidebar__item{% if request.path == url_for('auth.account') %} is-active{% endif %}"
+         href="{{ url_for('auth.account') }}" title="Account">
+        <span class="icon"><img class="sidebar__avatar"
+             src="{{ url_for('home.avatar_file', filename=current_user_obj['avatar_filename']) if current_user_obj and current_user_obj['avatar_filename'] else url_for('static', filename='img/avatar-default.svg') }}"
+             alt="avatar"></span><span class="label">Account</span>
+      </a>
+      <a class="sidebar__item" href="{{ url_for('auth.logout') }}"
+         data-confirm="Log out of this account?"
+         title="Log out ({{ session_username }})">
+        <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></span><span class="label">Log out ({{ session_username }})</span>
+      </a>
+    </div>
+    {% endif %}
+  </aside>
+  <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+  <main class="main">
+    <div class="container">
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, message in messages %}
+          <div class="flash flash--{{ category }}">{{ message }}</div>
+        {% endfor %}
+      {% endwith %}
+
+      {% block content %}{% endblock %}
+    </div>
+  </main>
+
+  <!-- Generic confirmation dialog, driven by any element carrying data-confirm. -->
+  <dialog id="confirm-dialog" class="confirm-dialog">
+    <article class="dialog-card">
+      <p id="confirm-message"></p>
+      <div class="dialog-actions">
+        <button type="button" class="btn btn--danger" id="confirm-yes">Confirm</button>
+        <button type="button" class="btn btn--ghost" id="confirm-no">Cancel</button>
+      </div>
+    </article>
+  </dialog>
+
+  <script>
+    // Off-canvas sidebar drawer (mobile). On desktop the sidebar is
+    // always visible and the toggle button is hidden by CSS.
+    (function () {
+      var btn = document.getElementById('sidebar-toggle');
+      var sidebar = document.getElementById('sidebar');
+      var overlay = document.getElementById('sidebar-overlay');
+      btn.addEventListener('click', function () {
+        document.body.classList.toggle('sidebar-open');
+      });
+      overlay.addEventListener('click', function () {
+        document.body.classList.remove('sidebar-open');
+      });
+      sidebar.querySelectorAll('a').forEach(function (a) {
+        a.addEventListener('click', function () {
+          document.body.classList.remove('sidebar-open');
+        });
+      });
+
+      // Desktop: collapse the sidebar to an icon-only rail, persist choice.
+      var collapse = document.getElementById('sidebar-collapse');
+      var body = document.body;
+      if (localStorage.getItem('sidebar-collapsed') === '1') body.classList.add('sidebar-collapsed');
+      collapse.addEventListener('click', function () {
+        body.classList.toggle('sidebar-collapsed');
+        localStorage.setItem('sidebar-collapsed',
+          body.classList.contains('sidebar-collapsed') ? '1' : '0');
+      });
+    })();
+  </script>
+  <script>
+    // Generic confirm() replacement: a single styled <dialog> shared by every
+    // element that carries a data-confirm attribute. Returns a Promise<boolean>.
+    (function () {
+      var dialog = document.getElementById('confirm-dialog');
+      var messageEl = document.getElementById('confirm-message');
+      var yesBtn = document.getElementById('confirm-yes');
+      var noBtn = document.getElementById('confirm-no');
+      var pending = null;
+
+      window.svsConfirm = function (message) {
+        messageEl.textContent = message;
+        dialog.showModal();
+        return new Promise(function (resolve) { pending = resolve; });
+      };
+      function settle(result) {
+        if (pending) { pending(result); pending = null; }
+        dialog.close();
+      }
+      yesBtn.addEventListener('click', function () { settle(true); });
+      noBtn.addEventListener('click', function () { settle(false); });
+      dialog.addEventListener('cancel', function () { settle(false); });
+
+      // Links: block navigation up front, only follow through on confirm.
+      document.querySelectorAll('a[data-confirm]').forEach(function (el) {
+        el.addEventListener('click', function (ev) {
+          ev.preventDefault();
+          window.svsConfirm(el.getAttribute('data-confirm')).then(function (ok) {
+            if (ok) window.location.href = el.getAttribute('href');
+          });
+        });
+      });
+      // Forms: block submission, re-submit only on confirm.
+      document.querySelectorAll('form[data-confirm]').forEach(function (form) {
+        form.addEventListener('submit', function (ev) {
+          if (form.dataset._confirming === '1') return; // our own requestSubmit
+          ev.preventDefault();
+          window.svsConfirm(form.getAttribute('data-confirm')).then(function (ok) {
+            if (ok) {
+              form.dataset._confirming = '1';
+              form.requestSubmit();
+              delete form.dataset._confirming;
+            }
+          });
+        });
+      });
+    })();
+  </script>
+</body>
+</html>

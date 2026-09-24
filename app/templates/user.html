@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+{% block title %}My Videos — Simple Video Share{% endblock %}
+{% block content %}
+<div class="page">
+  <h1>My videos</h1>
+
+  <section class="panel">
+    <h2>Folders</h2>
+    <ul id="folder-list">
+      {% for folder in folders %}
+      <li>
+        {{ folder['name'] }}
+        <button data-folder-id="{{ folder['id'] }}" class="btn-rename">Rename</button>
+        <button data-folder-id="{{ folder['id'] }}" class="btn-delete">Delete</button>
+      </li>
+      {% else %}
+      <li class="muted">No folders.</li>
+      {% endfor %}
+    </ul>
+    <form id="folder-form">
+      <input type="text" id="folder-name" placeholder="New folder name" required>
+      <button type="submit">Create folder</button>
+    </form>
+  </section>
+
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr><th>Title</th><th>Folder</th><th>Size</th><th>Status</th><th class="row-actions"></th></tr>
+      </thead>
+      <tbody>
+        {% for video in videos %}
+        <tr>
+          <td><a class="row-title" href="{{ url_for('watch.page', video_id=video['id']) }}">{{ video['title'] }}</a></td>
+          <td>{{ video['folder_name'] or '—' }}</td>
+          <td>{{ video['size_bytes'] | human_size }}</td>
+          <td class="status-cell">
+            {% if video['status'] == 'uploading' %}
+            <div class="video-progress" data-video-id="{{ video['id'] }}">
+              <div class="progress"><div class="progress__fill" style="width: 0%"></div></div>
+              <span class="progress__label">Uploading…</span>
+            </div>
+            {% elif video['status'] == 'failed' %}
+            <span class="badge badge--danger">upload failed</span>
+            {% else %}
+            <span class="badge">ready</span>
+            {% endif %}
+          </td>
+          <td class="row-actions">
+            {% if video['status'] == 'failed' %}
+            <form method="post" action="{{ url_for('user.retry_video', video_id=video['id']) }}">
+              <button type="submit" class="btn btn--ghost btn--sm">Retry</button>
+            </form>
+            {% endif %}
+            <button class="btn btn--ghost btn--sm btn-edit"
+                    data-video-id="{{ video['id'] }}"
+                    data-title="{{ video['title'] }}"
+                    data-description="{{ video['description'] or '' }}"
+                    data-cover="{{ '/covers/' + video['cover_filename'] if video['cover_filename'] else url_for('static', filename='img/placeholder.svg') }}">Edit</button>
+            <form method="post"
+                  action="{{ url_for('user.delete_video', video_id=video['id']) }}"
+                  data-confirm="Delete this video? This also removes the local copy and the Google Drive file.">
+              <button type="submit" class="btn btn--danger btn--sm btn-delvid">Delete</button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="muted">No videos.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Edit dialog (title, description + optional new cover), shared by all Edit buttons.
+       Styled to match the Upload page (§13.15). -->
+  <dialog id="edit-dialog" class="edit-dialog">
+    <article class="dialog-card">
+      <h2>Edit video</h2>
+      <form id="edit-form" method="post" enctype="multipart/form-data">
+        <div class="upload-section">
+          <label for="edit-title" class="upload-label">Title</label>
+          <input id="edit-title" name="title" type="text" class="upload-input" required>
+        </div>
+        <div class="upload-section">
+          <label for="edit-description" class="upload-label">Description <span class="muted">(optional)</span></label>
+          <textarea id="edit-description" name="description" rows="3" class="upload-input"></textarea>
+        </div>
+        <div class="upload-section">
+          <label class="upload-label">Cover <span class="muted">(leave empty to keep current)</span></label>
+          <div class="upload-cover">
+            <img id="edit-cover" class="upload-cover__img" alt="Current cover" src="">
+            <input type="file" id="edit-cover-input" name="cover" accept="image/*" hidden>
+            <button type="button" class="upload-cover__btn" id="edit-cover-btn">Choose new cover</button>
+          </div>
+        </div>
+        <div class="dialog-actions">
+          <button type="submit" class="btn">Save</button>
+          <button type="button" class="btn btn--ghost" id="edit-cancel">Cancel</button>
+        </div>
+      </form>
+    </article>
+  </dialog>
+</div>
+
+<script>
+(function () {
+  var dialog = document.getElementById('edit-dialog');
+  var form = document.getElementById('edit-form');
+  var titleInput = document.getElementById('edit-title');
+  var descInput = document.getElementById('edit-description');
+  var coverInput = document.getElementById('edit-cover-input');
+  var coverBtn = document.getElementById('edit-cover-btn');
+  var coverPreview = document.getElementById('edit-cover');
+
+  document.querySelectorAll('.btn-edit').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      form.action = '/user/videos/' + btn.dataset.videoId + '/edit';
+      titleInput.value = btn.dataset.title;
+      descInput.value = btn.dataset.description || '';
+      coverInput.value = '';
+      coverPreview.src = btn.dataset.cover;
+      dialog.showModal();
+    });
+  });
+
+  coverBtn.addEventListener('click', function () { coverInput.click(); });
+  coverInput.addEventListener('change', function () {
+    var file = coverInput.files && coverInput.files[0];
+    if (file) {
+      coverPreview.src = URL.createObjectURL(file);
+    }
+  });
+
+  document.getElementById('edit-cancel').addEventListener('click', function () {
+    dialog.close();
+  });
+})();
+</script>
+
+<script>
+// Poll /user/progress while any of this user's videos is uploading to Google
+// Drive. The bar fills as chunks commit; when a video reaches a terminal state
+// (the worker drops its progress entry on success, or reports an error) the
+// page reloads so the Status column reflects the new DB status.
+(function () {
+  var rows = document.querySelectorAll('.video-progress');
+  if (rows.length === 0) return;
+  var known = {};
+  rows.forEach(function (el) { known[el.getAttribute('data-video-id')] = true; });
+  var timer = setInterval(function () {
+    fetch('/user/progress').then(function (r) { return r.json(); }).then(function (data) {
+      var changed = false;
+      Object.keys(known).forEach(function (id) {
+        var p = data[id];
+        if (p === undefined) { changed = true; return; } // finished -> ready
+        if (p.error) { changed = true; return; }        // failed
+        var el = document.querySelector('.video-progress[data-video-id="' + id + '"]');
+        if (!el) return;
+        var total = p.total_bytes || 1;
+        var pct = Math.min(100, Math.round((p.uploaded_bytes || 0) * 100 / total));
+        var fill = el.querySelector('.progress__fill');
+        var label = el.querySelector('.progress__label');
+        if (fill) fill.style.width = pct + '%';
+        var speedTxt = p.speed_bps ? ' · ' + (p.speed_bps / 1048576).toFixed(1) + ' MB/s' : '';
+        if (label) label.textContent = 'Uploading… ' + pct + '%' + speedTxt;
+      });
+      if (changed) { clearInterval(timer); window.location.reload(); }
+    }).catch(function () {});
+  }, 1500);
+})();
+</script>
+{% endblock %}

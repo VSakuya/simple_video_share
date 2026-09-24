@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}Admin — Simple Video Share{% endblock %}
+{% block content %}
+<div class="page">
+  <h1>Admin</h1>
+
+  <section class="panel">
+    <h2>Settings</h2>
+    <form id="settings-form" method="post" action="{{ url_for('admin.save_settings') }}">
+      <div class="settings-grid">
+        <div class="field">
+          <label for="setting-default-bitrate">Default bitrate (kbps)</label>
+          <input id="setting-default-bitrate" type="number" name="default_bitrate" value="{{ settings.get('default_bitrate', '5000') }}">
+        </div>
+        <div class="field">
+          <label for="setting-default-codec">Default codec</label>
+          <input id="setting-default-codec" type="text" name="default_codec" value="{{ settings.get('default_codec', 'av1') }}">
+        </div>
+        <div class="field">
+          <label for="setting-fallback-codec">Fallback codec</label>
+          <input id="setting-fallback-codec" type="text" name="fallback_codec" value="{{ settings.get('fallback_codec', 'h264') }}">
+        </div>
+        <div class="field">
+          <label for="setting-max-resolution">Max resolution</label>
+          <input id="setting-max-resolution" type="number" name="max_resolution" value="{{ settings.get('max_resolution', '1080') }}">
+        </div>
+        <div class="field">
+          <label for="setting-max-fps">Max FPS</label>
+          <input id="setting-max-fps" type="number" name="max_fps" value="{{ settings.get('max_fps', '60') }}">
+        </div>
+        <div class="field">
+          <label for="setting-min-free-space">Min free space (MB)</label>
+          <input id="setting-min-free-space" type="number" name="min_free_space_bytes" value="{{ (settings.get('min_free_space_bytes', '524288000') | int) // 1048576 }}">
+        </div>
+        <div class="field">
+          <label for="setting-max-cache">Max cache (MB)</label>
+          <input id="setting-max-cache" type="number" name="max_cache_mb" value="{{ settings.get('max_cache_mb', '0') }}">
+          <span class="hint">Total size of locally cached videos; 0 = unlimited. When exceeded, the oldest cached videos that already have a Google Drive copy are deleted. Videos still uploading to Drive are kept.</span>
+        </div>
+      </div>
+      <p class="muted">
+        Cached videos: {{ cached_bytes | human_size }}
+        {% if cache_cap_bytes > 0 %} / cap {{ cache_cap_bytes | human_size }}{% else %} (no cap){% endif %}
+      </p>
+      <button type="submit" class="btn">Save settings</button>
+    </form>
+  </section>
+
+  <div class="panel-grid">
+    <section class="panel">
+      <h2>Users</h2>
+      <div class="table-wrap">
+      <table id="user-list" class="table">
+        <thead>
+          <tr><th>Username</th><th>Role</th><th></th></tr>
+        </thead>
+        <tbody>
+          {% for u in users %}
+          <tr>
+            <td>{{ u['username'] }}</td>
+            <td>
+              {% if u['is_admin'] %}<span class="badge badge--admin">admin</span>
+              {% else %}<span class="badge">user</span>{% endif %}
+            </td>
+            <td class="row-actions">
+              <form method="post" action="{{ url_for('admin.delete_user', user_id=u['id']) }}"
+                    data-confirm="Delete this user?">
+                <button type="submit" class="btn btn--danger btn--sm">Delete</button>
+              </form>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="3" class="muted">No users.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Create user</h2>
+      <form method="post" action="{{ url_for('admin.create_user') }}">
+        <div class="field">
+          <label for="new-username">Username</label>
+          <input id="new-username" type="text" name="username" required>
+        </div>
+        <div class="field">
+          <label for="new-password">Password</label>
+          <input id="new-password" type="password" name="password" required minlength="6">
+        </div>
+        <div class="field field--check">
+          <label><input type="checkbox" name="is_admin"> Admin</label>
+        </div>
+        <button type="submit" class="btn">Create user</button>
+      </form>
+    </section>
+  </div>
+
+  <section class="panel">
+    <h2>All videos</h2>
+    <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr><th>Title</th><th>Owner</th><th>Status</th><th>Cached</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for video in videos %}
+        <tr>
+          <td>{{ video['title'] }}</td>
+          <td>{{ video['owner_name'] }}</td>
+          <td>{{ video['status'] }}</td>
+          <td>{{ 'yes' if video['local_filename'] else 'no' }}</td>
+          <td class="row-actions">
+            <button class="btn btn--danger btn--sm btn-delvid" data-video-id="{{ video['id'] }}">Delete</button>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="muted">No videos.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </section>
+</div>
+{% endblock %}
