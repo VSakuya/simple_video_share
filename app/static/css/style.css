@@ -164,7 +164,21 @@ button:hover { filter: brightness(1.1); }
 }
 .card__cover { width: 100%; display: block; }
 .card__title { padding: 8px 10px 0; font-size: 0.9rem; }
-.card__meta { padding: 0 10px 8px; font-size: 0.8rem; }
+.card__meta {
+  padding: 0 10px 8px;
+  font-size: 0.8rem;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.card__avatar {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex: 0 0 auto;
+}
+.card__owner { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .bar { background: #222a38; border-radius: 6px; overflow: hidden; height: 14px; }
 .bar__fill { height: 100%; width: 0; background: var(--accent); transition: width 0.2s; }
@@ -672,6 +686,24 @@ button:disabled { opacity: 0.55; cursor: not-allowed; filter: none; }
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+/* Uploader row (watch page): circular avatar + username, shown above the description. */
+.video-author {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 0 0;
+  padding: 10px 14px;
+  background: var(--panel);
+  border-radius: 10px;
+}
+.video-author__avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex: 0 0 auto;
+}
+.video-author__name { font-weight: 600; }
 
 /* ===== Comments (watch page, §13.16) ===== */
 .comments {

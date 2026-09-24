@@ -17,7 +17,12 @@
          src="{{ url_for('home.cover', filename=video['cover_filename']) if video['cover_filename'] else url_for('static', filename='img/placeholder.svg') }}"
          alt="{{ video['title'] }}" loading="lazy">
     <div class="card__title">{{ video['title'] }}</div>
-    <div class="card__meta muted">{{ video['owner_name'] }}</div>
+    <div class="card__meta">
+      <img class="card__avatar"
+           src="{{ url_for('home.avatar_file', filename=video['owner_avatar_filename']) if video['owner_avatar_filename'] else url_for('static', filename='img/avatar-default.svg') }}"
+           alt="{{ video['owner_name'] }}" loading="lazy">
+      <span class="card__owner muted">{{ video['owner_name'] }}</span>
+    </div>
   </a>
   {% else %}
   <p class="muted">No videos yet.</p>

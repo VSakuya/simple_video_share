@@ -6,6 +6,13 @@
 <video id="player" controls width="100%"
        src="{{ url_for('watch.stream', video_id=video['id']) }}"></video>
 
+<div class="video-author">
+  <img class="video-author__avatar"
+       src="{{ url_for('home.avatar_file', filename=video['owner_avatar_filename']) if video['owner_avatar_filename'] else url_for('static', filename='img/avatar-default.svg') }}"
+       alt="{{ video['owner_name'] }}">
+  <span class="video-author__name">{{ video['owner_name'] }}</span>
+</div>
+
 {% if video['description'] %}
 <div class="video-description">{{ video['description'] }}</div>
 {% endif %}

@@ -355,7 +355,13 @@ def create_video(
 
 def get_video_by_id(video_id: int) -> Optional[dict[str, Any]]:
     conn = get_db()
-    row = conn.execute("SELECT * FROM videos WHERE id = ?", (video_id,)).fetchone()
+    row = conn.execute(
+        """SELECT v.*, u.username AS owner_name, u.avatar_filename AS owner_avatar_filename
+           FROM videos v
+           JOIN users u ON v.owner_id = u.id
+           WHERE v.id = ?""",
+        (video_id,),
+    ).fetchone()
     conn.close()
     return dict(row) if row else None
 
@@ -382,7 +388,8 @@ def list_public_videos() -> list[dict[str, Any]]:
     """
     conn = get_db()
     rows = conn.execute(
-        """SELECT v.*, u.username AS owner_name, f.name AS folder_name
+        """SELECT v.*, u.username AS owner_name, u.avatar_filename AS owner_avatar_filename,
+                  f.name AS folder_name
            FROM videos v
            JOIN users u   ON v.owner_id = u.id
            LEFT JOIN folders f ON v.folder_id = f.id
