@@ -62,9 +62,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
     comment_cols = {row[1] for row in conn.execute("PRAGMA table_info(comments)").fetchall()}
     if "parent_id" not in comment_cols:
         conn.execute("ALTER TABLE comments ADD COLUMN parent_id INTEGER")
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_comments_parent ON comments (parent_id)"
-        )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_comments_parent ON comments (parent_id)")
 
 
 def init_db() -> None:

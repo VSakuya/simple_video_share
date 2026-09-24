@@ -75,4 +75,3 @@ CREATE TABLE IF NOT EXISTS comments (
     FOREIGN KEY (parent_id) REFERENCES comments (id) ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS idx_comments_video ON comments (video_id, id);
-CREATE INDEX IF NOT EXISTS idx_comments_parent ON comments (parent_id);
