@@ -62,13 +62,17 @@ CREATE TABLE IF NOT EXISTS login_attempts (
 
 -- Comments on videos (plain text, kaomoji allowed, no HTML). Authors are users;
 -- deleting a video or a user cascades away their comments.
+-- Two-level nesting: parent_id NULL = top-level; non-NULL = reply to that comment.
 CREATE TABLE IF NOT EXISTS comments (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     video_id    INTEGER NOT NULL,
     author_id   INTEGER NOT NULL,
+    parent_id   INTEGER,
     body        TEXT    NOT NULL,
     created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (video_id)  REFERENCES videos (id) ON DELETE CASCADE,
-    FOREIGN KEY (author_id) REFERENCES users  (id) ON DELETE CASCADE
+    FOREIGN KEY (author_id) REFERENCES users  (id) ON DELETE CASCADE,
+    FOREIGN KEY (parent_id) REFERENCES comments (id) ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS idx_comments_video ON comments (video_id, id);
+CREATE INDEX IF NOT EXISTS idx_comments_parent ON comments (parent_id);

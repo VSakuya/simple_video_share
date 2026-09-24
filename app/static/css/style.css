@@ -781,3 +781,28 @@ button:disabled { opacity: 0.55; cursor: not-allowed; filter: none; }
   line-height: 1.6;
   font-size: 0.95rem;
 }
+
+/* ===== Two-level replies (§13.20) ===== */
+.comment__actions { margin-top: 6px; }
+
+/* Reply form: hidden by default, shown when .is-visible is present. */
+.comment__reply-form { display: none; margin-top: 10px; }
+.comment__reply-form.is-visible { display: block; }
+
+/* Replies are indented beneath their parent comment. */
+.comment__replies {
+  list-style: none;
+  margin: 10px 0 0 28px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.comment--reply {
+  padding: 8px 12px;
+  background: #1a2130;
+}
+.comment--reply .comment__avatar {
+  width: 28px;
+  height: 28px;
+}

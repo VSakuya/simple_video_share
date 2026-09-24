@@ -1,4 +1,4 @@
-"""Watch blueprint: Range streaming + Drive download (P3), and comments (§13.16)."""
+"""Watch blueprint: Range streaming + Drive download (P3), and comments (§13.16, §13.20)."""
 
 from typing import Any
 from flask import Blueprint, flash, redirect, render_template, request, url_for
@@ -65,7 +65,25 @@ def add_comment(video_id: int) -> Any:
     if len(body) > MAX_COMMENT_LENGTH:
         flash(f"Comment too long (max {MAX_COMMENT_LENGTH} characters).", "error")
         return redirect(url_for("watch.page", video_id=video_id))
-    db.add_comment(video_id, me["id"], body)
+    # Optional parent_id for two-level replies (§13.20).
+    parent_id: int | None = None
+    parent_raw = request.form.get("parent_id")
+    if parent_raw:
+        try:
+            parent_id = int(parent_raw)
+        except (TypeError, ValueError):
+            parent_id = None
+        if parent_id is not None:
+            # Validate: the parent must be a top-level comment on this video.
+            parent = db.get_comment_by_id(parent_id)
+            if (
+                parent is None
+                or parent["video_id"] != video_id
+                or parent.get("parent_id") is not None
+            ):
+                flash("Invalid reply target.", "error")
+                return redirect(url_for("watch.page", video_id=video_id))
+    db.add_comment(video_id, me["id"], body, parent_id=parent_id)
     return redirect(url_for("watch.page", video_id=video_id))
 
 

@@ -59,6 +59,13 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if "drive_resumable_uri" not in video_cols:
         conn.execute("ALTER TABLE videos ADD COLUMN drive_resumable_uri TEXT")
 
+    comment_cols = {row[1] for row in conn.execute("PRAGMA table_info(comments)").fetchall()}
+    if "parent_id" not in comment_cols:
+        conn.execute("ALTER TABLE comments ADD COLUMN parent_id INTEGER")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_comments_parent ON comments (parent_id)"
+        )
+
 
 def init_db() -> None:
     """Create all tables (from ``sql/schema.sql``), migrate, and seed defaults."""
@@ -496,11 +503,11 @@ def get_all_settings() -> dict[str, str]:
 # Comments
 # ---------------------------------------------------------------------------
 
-def add_comment(video_id: int, author_id: int, body: str) -> int:
+def add_comment(video_id: int, author_id: int, body: str, parent_id: Optional[int] = None) -> int:
     conn = get_db()
     cur = conn.execute(
-        "INSERT INTO comments (video_id, author_id, body) VALUES (?, ?, ?)",
-        (video_id, author_id, body),
+        "INSERT INTO comments (video_id, author_id, parent_id, body) VALUES (?, ?, ?, ?)",
+        (video_id, author_id, parent_id, body),
     )
     conn.commit()
     comment_id = cur.lastrowid
@@ -510,18 +517,35 @@ def add_comment(video_id: int, author_id: int, body: str) -> int:
 
 
 def list_comments(video_id: int) -> list[dict[str, Any]]:
-    """Return a video's comments, newest first, with author name + avatar."""
+    """Return a video's top-level comments with their replies nested under
+    ``comment['replies']``, all ordered oldest-first."""
     conn = get_db()
     rows = conn.execute(
-        """SELECT c.id, c.body, c.created_at, u.username, u.avatar_filename
+        """SELECT c.id, c.parent_id, c.body, c.created_at,
+                  u.username, u.avatar_filename
            FROM comments c
            JOIN users u ON c.author_id = u.id
            WHERE c.video_id = ?
-           ORDER BY c.id DESC""",
+           ORDER BY c.id""",
         (video_id,),
     ).fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+
+    # Build a map: parent_id -> list of comment dicts (ordered by id).
+    top: list[dict[str, Any]] = []
+    by_parent: dict[int, list[dict[str, Any]]] = {}
+    for row in rows:
+        comment = dict(row)
+        parent = comment.pop("parent_id", None)
+        if parent is None:
+            top.append(comment)
+        else:
+            by_parent.setdefault(parent, []).append(comment)
+
+    # Attach replies to each top-level comment.
+    for comment in top:
+        comment["replies"] = by_parent.get(comment["id"], [])
+    return top
 
 
 def get_comment_by_id(comment_id: int) -> Optional[dict[str, Any]]:
@@ -532,7 +556,9 @@ def get_comment_by_id(comment_id: int) -> Optional[dict[str, Any]]:
 
 
 def delete_comment(comment_id: int) -> None:
+    """Delete a comment and all of its replies (application-layer cascade)."""
     conn = get_db()
+    conn.execute("DELETE FROM comments WHERE parent_id = ?", (comment_id,))
     conn.execute("DELETE FROM comments WHERE id = ?", (comment_id,))
     conn.commit()
     conn.close()
