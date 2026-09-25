@@ -170,8 +170,10 @@ table { font-size: 0.88rem; }
 /* Collapsed (icon-only) state, YouTube-style. */
 body.sidebar-collapsed .sidebar { width: var(--sidebar-w-collapsed); padding: 8px 6px; }
 body.sidebar-collapsed .sidebar__brand,
-body.sidebar-collapsed .sidebar__item .label { display: none; }
-body.sidebar-collapsed .sidebar__item { justify-content: center; padding: 9px 0; }
+body.sidebar-collapsed .sidebar__item .label,
+body.sidebar-collapsed .sidebar__theme-toggle .label { display: none; }
+body.sidebar-collapsed .sidebar__item,
+body.sidebar-collapsed .sidebar__theme-toggle { justify-content: center; padding: 9px 0; }
 body.sidebar-collapsed .main { margin-left: var(--sidebar-w-collapsed); }
 
 .main { margin-left: var(--sidebar-w); }
@@ -195,8 +197,10 @@ body.sidebar-collapsed .main { margin-left: var(--sidebar-w-collapsed); }
   body.sidebar-collapsed .main { margin-left: 0; }
   body.sidebar-collapsed .sidebar { width: var(--sidebar-w); }
   body.sidebar-collapsed .sidebar__brand,
-  body.sidebar-collapsed .sidebar__item .label { display: block; }
-  body.sidebar-collapsed .sidebar__item { justify-content: flex-start; padding: 9px 12px; }
+  body.sidebar-collapsed .sidebar__item .label,
+  body.sidebar-collapsed .sidebar__theme-toggle .label { display: block; }
+  body.sidebar-collapsed .sidebar__item,
+  body.sidebar-collapsed .sidebar__theme-toggle { justify-content: flex-start; padding: 9px 12px; }
 }
 
 .container { max-width: 92rem; margin: 0 auto; padding: 1.25rem; }
@@ -305,6 +309,13 @@ button:hover { filter: brightness(1.1); }
 .player-wrap {
   position: relative;
   margin: 0 0 12px;
+  /* Carry the aspect ratio on this NON-REPLACED wrapper, not on the <video>.
+     width:100% + aspect-ratio gives the wrapper a definite height for ANY ratio
+     (16/9 is the pre-metadata fallback), so the box is never 0px tall while the
+     media's metadata loads. The player fills it via width/height:100%, so the box
+     always matches the video with no left/right bars (§13.32). applyRatio() in
+     watch.html updates this to the exact videoWidth/videoHeight on loadedmetadata. */
+  aspect-ratio: 16 / 9;
   border-radius: 8px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
   overflow: hidden;
@@ -312,32 +323,9 @@ button:hover { filter: brightness(1.1); }
 #player {
   display: block;
   width: 100%;
-  aspect-ratio: 16 / 9;
   background: #000;
   border-radius: 0;
 }
-/* Fullscreen button: hidden until the user hovers the player. */
-.player-fullscreen-btn {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  width: 38px;
-  height: 38px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.55);
-  border: none;
-  border-radius: 8px;
-  color: #fff;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.2s;
-  z-index: 10;
-}
-.player-wrap:hover .player-fullscreen-btn { opacity: 1; }
-.player-fullscreen-btn:hover { background: rgba(0, 0, 0, 0.8); }
-.player-fullscreen-btn svg { width: 20px; height: 20px; }
 #player:fullscreen { border-radius: 0; }
 #caching-status { color: var(--warn-fg); font-weight: 600; margin: 8px 0; }
 
@@ -346,13 +334,29 @@ button:hover { filter: brightness(1.1); }
    big-play-button and controls sit inside the rounded card like a native video. */
 .video-js {
   width: 100% !important;
-  aspect-ratio: 16 / 9;
+  /* Fill .player-wrap (which carries the aspect-ratio): width:100% + height:100%
+     make the player track the video's ratio for any source with no bars (§13.32).
+     In-page fullscreen adds .inpage-overlay__fill to the SAME element, which also
+     sets height:100% (so the two agree) plus object-fit:contain, so fullscreen
+     still letterboxes correctly. */
+  height: 100% !important;
   background: #000;
 }
 .video-js .vjs-big-play-button {
   /* Keep video.js' built-in big-play-button; just make it theme-agnostic. */
   background: rgba(0, 0, 0, 0.6);
 }
+/* In-page fullscreen button in video.js' bottom control bar (§13.27). It replaces
+   the native fullscreen button (hidden below), because this app uses in-page
+   fullscreen rather than the browser Fullscreen API. */
+.svs-inpage-fs {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.svs-inpage-fs svg { width: 1.8em; height: 1.8em; }
+.svs-inpage-fs:hover svg { filter: drop-shadow(0 0 0.25em #fff); }
 
 /* ===== In-page fullscreen overlay (§13.26) ===== */
 /* A fixed, page-level overlay used by the watch page and the upload clip panel.
@@ -388,6 +392,10 @@ button:hover { filter: brightness(1.1); }
   object-fit: contain;
   background: #000;
 }
+/* Tag-reuse video.js player: the .video-js element IS the <video>, so object-fit
+   must be set on the element itself (the descendant selectors above match a child
+   <video>, which does not exist here). */
+.inpage-overlay__fill.video-js { object-fit: contain; }
 .inpage-overlay__exit {
   position: absolute;
   top: 12px;

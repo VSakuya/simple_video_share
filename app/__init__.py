@@ -60,13 +60,14 @@ def create_app() -> Flask:
     app.config["DRIVE_FOLDER_ID"] = cfg.get("drive_folder_id", "")
 
     # Subpath the app is mounted under behind a reverse proxy (e.g. "/video").
-    # Normalize: strip any trailing slash, keep the leading slash. Empty means
-    # "serve from the domain root". Exposed to templates as ``svs_base``.
-    base_path = str(cfg.get("base_path", "") or "").strip()
-    if base_path:
-        base_path = base_path.rstrip("/")
-        if not base_path.startswith("/"):
-            base_path = "/" + base_path
+    # Normalize: strip trailing slashes, keep the leading slash. "" (or a lone
+    # "/") means "serve from the domain root" and must stay empty — a truthy "/"
+    # would leak to the client as SVS_BASE="/" and make hand-written fetch URLs
+    # protocol-relative ("//…"), which the browser treats as a different host
+    # (§13.29). Exposed to templates as ``svs_base``.
+    base_path = str(cfg.get("base_path", "") or "").strip().rstrip("/")
+    if base_path and not base_path.startswith("/"):
+        base_path = "/" + base_path
     app.config["BASE_PATH"] = base_path
 
 

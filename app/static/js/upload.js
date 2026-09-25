@@ -926,11 +926,8 @@ $("set-end-btn").addEventListener("click", () => {
 // source of truth that clipRange() reads.
 $("clip-start-input").addEventListener("change", () => onTimeInputChanged("clip-start-input", "clip-start"));
 $("clip-end-input").addEventListener("change", () => onTimeInputChanged("clip-end-input", "clip-end"));
-// Stop the preview at the set end so the user can confirm the cut point.
-previewVideo.addEventListener("timeupdate", () => {
-  const end = currentClipEnd();
-  if (end > 0 && previewVideo.currentTime >= end) previewVideo.pause();
-});
+// The preview plays continuously (no forced pause at the set end point): the
+// user can scrub through the whole video after Set End to verify the range.
 
 // In-page fullscreen for the clip panel (§13.26): the button carries
 // data-inpage-expand="#clip-timeline", so inpage.js (loaded from base.html)

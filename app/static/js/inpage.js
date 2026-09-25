@@ -73,5 +73,9 @@
     if (target) expand(target);
   });
 
-  window.inpage = { expand: expand, exit: exit };
+  window.inpage = {
+    expand: expand,
+    exit: exit,
+    isActive: function () { return active; }
+  };
 })();
