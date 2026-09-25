@@ -199,6 +199,10 @@ class DriveUploadWorker:
                     )
             # Enforce the cache-capacity cap now that this video has a Drive copy.
             self._enforce_cap(videos_dir, base_dir, app_config)
+            # Drop the in-memory progress entry so the My Videos poller sees the
+            # terminal state (p === undefined) and reloads to the "ready" badge.
+            # Without this the bar stalls at the last committed chunk (~98-99%).
+            self._drop(video_id)
         except Exception as exc:  # noqa: BLE001 - surface a friendly failure
             logger.error("worker: Drive upload failed for video id=%s: %s", video_id, exc)
             self._fail(video_id, str(exc))
@@ -252,6 +256,11 @@ class DriveUploadWorker:
             logger.warning(
                 "worker: could not save resumable session for id=%s: %s", video_id, exc
             )
+
+    def _drop(self, video_id: int) -> None:
+        """Remove the progress entry on success so the poller detects completion."""
+        with self._lock:
+            self._progress.pop(video_id, None)
 
     def _fail(self, video_id: int, error: str) -> None:
         from . import db

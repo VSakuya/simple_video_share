@@ -260,22 +260,21 @@ button:hover { filter: brightness(1.1); }
 }
 .card__owner { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* Folder cards on the home page (§13.26): a folder is a card like a video,
-   but with a folder glyph instead of a cover. */
-.folder-card {
-  display: flex; align-items: center; gap: 12px;
-  background: var(--panel); border-radius: 8px; padding: 14px 16px;
-  text-decoration: none; color: var(--text); margin-bottom: 12px;
-}
+/* Folder cards on the home page (§13.26): a folder is a full-size cell in the
+   waterfall, the same size as a video card — the cover area is a folder glyph
+   and the title is the folder name. The base card layout comes from .card
+   (applied via the template's class="card folder-card"). */
 .folder-card:hover { background: var(--hover); }
-.folder-card__icon {
-  flex: 0 0 auto; width: 40px; height: 40px; border-radius: 8px;
-  background: var(--active); color: var(--accent);
+.folder-card__cover {
+  width: 100%; aspect-ratio: 16 / 9;
   display: flex; align-items: center; justify-content: center;
+  background: var(--active); color: var(--accent);
 }
-.folder-card__icon svg { width: 22px; height: 22px; }
-.folder-card__name { font-weight: 600; }
-.folder-card__count { font-size: 0.8rem; color: var(--muted); }
+.folder-card__cover svg { width: 44px; height: 44px; }
+.folder-card__title {
+  padding: 8px 10px; font-size: 0.9rem; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 
 /* Breadcrumb trail (§13.26). */
 .breadcrumb {
@@ -439,6 +438,14 @@ button:hover { filter: brightness(1.1); }
 }
 .inpage-overlay__exit:hover { background: rgba(0, 0, 0, 0.8); }
 .inpage-overlay__exit svg { width: 22px; height: 22px; }
+/* In in-page fullscreen, keep video.js' control bar visible so the progress
+   bar and playback toolbar are always available (bilibili-style). Without this
+   the bar auto-hides (vjs-user-inactive) and stays hidden, leaving only the
+   top-right exit button. */
+.inpage-overlay .vjs-control-bar {
+  visibility: visible !important;
+  opacity: 1 !important;
+}
 
 /* ===== Upload page ===== */
 .upload-page { max-width: 720px; margin: 0 auto; }

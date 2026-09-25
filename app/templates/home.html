@@ -23,17 +23,15 @@
     | Drive: unknown
   {% endif %}
 </p>
-{% if subfolders %}
-<div class="folders">
+<div class="waterfall" id="waterfall">
   {% for sf in subfolders %}
-  <a class="folder-card" href="{{ url_for('home.folder', folder_id=sf['id']) }}">
-    <span class="folder-card__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>
-    <span class="folder-card__name">{{ sf['name'] }}</span>
+  <a class="card folder-card" href="{{ url_for('home.folder', folder_id=sf['id']) }}">
+    <div class="folder-card__cover">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+    </div>
+    <div class="folder-card__title">{{ sf['name'] }}</div>
   </a>
   {% endfor %}
-</div>
-{% endif %}
-<div class="waterfall" id="waterfall">
   {% for video in videos %}
   <a class="card" href="{{ url_for('watch.page', video_id=video['id']) }}">
     <img class="card__cover"
