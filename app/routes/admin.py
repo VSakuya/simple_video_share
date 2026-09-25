@@ -1,12 +1,14 @@
 """Admin blueprint: manage all videos/users + global settings (P6)."""
 
 import logging
-from typing import Any
+import re
+from typing import Any, Optional
 
 from flask import (
     Blueprint,
     current_app,
     flash,
+    jsonify,
     redirect,
     render_template,
     request,
@@ -16,6 +18,7 @@ from werkzeug.security import generate_password_hash
 
 from .. import db, storage
 from ..auth import admin_required, current_user
+from ..log import LOG_DIR
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/admin")
 logger = logging.getLogger("simple_video_share.routes.admin")
@@ -31,6 +34,47 @@ _EDITABLE_SETTINGS = (
     "min_free_space_bytes",
     "max_cache_mb",
 )
+
+
+#: Log files the admin viewer may read, keyed by the source select value.
+_LOG_FILES = {
+    "app": "app.log",
+    "client": "client.log",
+}
+
+#: Log levels the viewer can filter on (logging's built-in level names).
+_LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
+
+#: Matches a log record's leading "<timestamp> <LEVEL>" so the level can be read
+#: back from a line. Continuation lines (e.g. tracebacks) carry no level token
+#: and inherit the level of the record they belong to.
+_LOG_LINE_RE = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\s+([A-Z]+)")
+
+#: Cap on how many matching lines a single request returns (newest last).
+_MAX_LOG_LINES = 2000
+
+
+def _read_filtered_log(path, level: str) -> list[dict[str, str]]:
+    """Read ``path`` and return the lines matching ``level`` (newest last).
+
+    ``level`` is ``"all"`` or one of ``_LOG_LEVELS``. Each returned item is
+    ``{"level": <record level>, "text": <line>}``. A line with no level token
+    (e.g. a traceback continuation line) inherits the level of the preceding
+    record so it stays attached when filtering.
+    """
+    lines: list[dict[str, str]] = []
+    current: Optional[str] = None
+    with path.open("r", encoding="utf-8", errors="replace") as fh:
+        for raw in fh:
+            m = _LOG_LINE_RE.match(raw)
+            lvl = m.group(1) if (m and m.group(1) in _LOG_LEVELS) else None
+            if lvl is not None:
+                current = lvl
+            eff = lvl if lvl is not None else current
+            if level != "all" and eff != level:
+                continue
+            lines.append({"level": eff or "", "text": raw.rstrip("\n")})
+    return lines
 
 
 @admin_bp.route("/")
@@ -102,3 +146,22 @@ def delete_user(user_id: int) -> Any:
         db.delete_user(user_id)
         flash("User deleted.", "success")
     return redirect(url_for("admin.index"))
+
+
+@admin_bp.route("/logs")
+@admin_required
+def logs() -> Any:
+    """Serve the admin log viewer: a log file filtered by level (newest last)."""
+    source = request.args.get("source", "app")
+    level = request.args.get("level", "all")
+    if source not in _LOG_FILES:
+        source = "app"
+    if level != "all" and level not in _LOG_LEVELS:
+        level = "all"
+    path = LOG_DIR / _LOG_FILES[source]
+    lines = _read_filtered_log(path, level) if path.exists() else []
+    total = len(lines)
+    truncated = total > _MAX_LOG_LINES
+    if truncated:
+        lines = lines[-_MAX_LOG_LINES:]
+    return jsonify(source=source, level=level, total=total, truncated=truncated, lines=lines)

@@ -1,21 +1,15 @@
 {% extends "base.html" %}
 {% block title %}{{ video['title'] }} — Simple Video Share{% endblock %}
 {% block head %}
-<link rel="stylesheet" href="{{ url_for('static', filename='vendor/video-js.min.css') }}">
-<script src="{{ url_for('static', filename='vendor/video.min.js') }}"></script>
-<script>
-  // video.js would otherwise inject a <style> forcing the player box to the video's
-  // native pixel height, which letterboxes it at width:100% (§13.27). Deferring
-  // sizing to our CSS lets the box track the video's aspect ratio.
-  window.VIDEOJS_NO_DYNAMIC_STYLE = true;
-</script>
+<!-- DPlayer (§13.39): single self-contained vendor JS; it injects its own CSS
+     and inline SVG icons, so no separate stylesheet or font is required. -->
+<script src="{{ url_for('static', filename='vendor/dplayer/DPlayer.min.js') }}?v={{ static_version }}"></script>
 {% endblock %}
 {% block content %}
 {% set video_id = video['id'] %}
 <h1 class="watch-title">{{ video['title'] }}</h1>
 <div class="player-wrap" id="player-wrap" {% if not is_cached %}style="display:none"{% endif %}>
-  <video id="player" class="video-js vjs-big-play-centered" controls preload="auto"
-         src="{{ url_for('watch.stream', video_id=video['id']) }}"></video>
+  <div id="dplayer"></div>
 </div>
 
 {% if not is_cached %}
@@ -53,7 +47,6 @@
   var pct = document.getElementById('cache-pct');
   var errEl = document.getElementById('cache-error');
   var playerWrap = document.getElementById('player-wrap');
-  var media = document.getElementById('player');
   var streamUrl = {{ url_for('watch.stream', video_id=video['id']) | tojson }};
   var startUrl = {{ url_for('watch.start_cache', video_id=video['id']) | tojson }};
   var statusUrl = {{ url_for('watch.cache_status', video_id=video['id']) | tojson }};
@@ -71,7 +64,9 @@
     if (poll) { clearInterval(poll); poll = null; }
     if (panel) panel.classList.add('hidden');
     if (playerWrap) playerWrap.style.display = '';
-    if (media) media.load();   // re-fetch the now-available stream
+    // Build the DPlayer now that the stream is available and the wrapper is
+    // visible (it was display:none while the Drive download ran).
+    if (window.initWatchPlayer) window.initWatchPlayer();
   }
   function check() {
     fetch(statusUrl)
@@ -121,68 +116,54 @@
 </script>
 {% endif %}
 <script>
-// video.js player: match the box to the video's aspect ratio (no letterbox) and
-// move in-page fullscreen into the bottom control bar (§13.27).
+// DPlayer replaces video.js (§13.39): a single self-contained vendor JS (loaded
+// in <head>) that renders an HTML5 <video> with its own controls and NATIVE
+// fullscreen (requestFullscreen on the container) — replacing the old video.js
+// in-page overlay. .player-wrap (above) carries the aspect-ratio (16/9 fallback);
+// DPlayer's container fills it via width/height:100%.
 (function () {
   'use strict';
-  var el = document.getElementById('player');
-  if (!el || !window.videojs) return;
+  var streamUrl = {{ url_for('watch.stream', video_id=video['id']) | tojson }};
+  var coverUrl = {{ (url_for('home.cover', filename=video['cover_filename']) if video['cover_filename'] else None) | tojson }};
 
-  var player = videojs('player');
+  // Idempotent: called once, either at load (already cached) or from the
+  // cache-poll IIFE's done() (the Drive download just finished and revealed the
+  // wrapper). The .dplayer class guard stops a double call building a 2nd player.
+  window.initWatchPlayer = function () {
+    var container = document.getElementById('dplayer');
+    if (!container || container.classList.contains('dplayer')) return;
 
-  // Match the player box to the video's native aspect ratio. VIDEOJS_NO_DYNAMIC_STYLE
-  // (set in <head>) stops video.js forcing a fixed pixel height; this sets the exact
-  // ratio from the media so even non-16:9 sources fill the box. In-page fullscreen
-  // overrides this with width/height:100% + object-fit:contain, so it is unaffected.
-  var media = el.tagName === 'VIDEO' ? el : el.querySelector('video');
-  var wrap = document.getElementById('player-wrap');
-  function applyRatio() {
-    var w = media.videoWidth, h = media.videoHeight;
-    if (w && h) {
-      // Set the EXACT intrinsic ratio on the wrapper. .player-wrap carries the
-      // aspect-ratio (16/9 fallback in CSS) and the player fills it via
-      // width/height:100%, so this corrects the box to the real ratio for any
-      // non-16:9 source — no left/right bars (§13.32).
-      if (wrap) wrap.style.setProperty('aspect-ratio', w + ' / ' + h);
-      // Belt-and-suspenders: drop any video.js dynamic-sizing artifact so the
-      // box is never pinned to a fixed pixel height even if
-      // VIDEOJS_NO_DYNAMIC_STYLE is somehow missed (Session §13.31).
-      el.classList.remove('player-dimensions');
-      var dyn = document.getElementById('vjs-styles-dimensions');
-      if (dyn && dyn.parentNode) dyn.parentNode.removeChild(dyn);
-    }
-  }
-  if (media) {
-    // Apply the exact ratio from whichever signal fires first; the rest are
-    // harmless no-ops. The video.js player's own 'loadedmetadata' fires after
-    // the tech's metadata is ready, so it covers the case where the native
-    // element event is missed (§13.29).
-    media.addEventListener('loadedmetadata', applyRatio);
-    if (player && player.on) player.on('loadedmetadata', applyRatio);
-    if (media.readyState >= 1) applyRatio();
-  }
-
-  // In-page fullscreen control in the bottom control bar (replaces the old
-  // top-right button). It toggles the overlay and sits where the native fullscreen
-  // button was (hidden, since the app uses in-page fullscreen instead).
-  player.ready(function () {
-    var bar = player.controlBar && player.controlBar.el();
-    if (!bar) return;
-    var nativeFs = bar.querySelector('.vjs-fullscreen-control');
-    var btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'vjs-control svs-inpage-fs';
-    btn.setAttribute('title', 'In-page fullscreen');
-    btn.setAttribute('aria-label', 'In-page fullscreen');
-    btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>';
-    btn.addEventListener('click', function () {
-      if (!window.inpage) return;
-      if (window.inpage.isActive()) window.inpage.exit();
-      else window.inpage.expand(el);
+    new DPlayer({
+      container: container,
+      autoplay: false,
+      loop: false,
+      video: { url: streamUrl, type: 'video', pic: coverUrl }
     });
-    if (nativeFs) nativeFs.parentNode.insertBefore(btn, nativeFs);
-    else bar.appendChild(btn);
-  });
+
+    // Match the box to the video's native aspect ratio (no letterbox), the same
+    // applyRatio() the old video.js code did: .player-wrap carries the ratio and
+    // the player fills it. DPlayer builds the <video> synchronously in its
+    // constructor, so it exists now; the listener also covers the (rare) case
+    // where metadata arrives after we check readyState.
+    var wrap = document.getElementById('player-wrap');
+    function applyRatio() {
+      var v = container.querySelector('video');
+      if (!v || !wrap) return;
+      var w = v.videoWidth, h = v.videoHeight;
+      if (w && h) wrap.style.setProperty('aspect-ratio', w + ' / ' + h);
+    }
+    var v = container.querySelector('video');
+    if (v) {
+      v.addEventListener('loadedmetadata', applyRatio);
+      if (v.readyState >= 1) applyRatio();
+    }
+  };
+
+  // Already cached: build the player now. Otherwise the cache-poll IIFE (above)
+  // calls initWatchPlayer() from done() once the download completes.
+  if ({{ is_cached | tojson }}) {
+    window.initWatchPlayer();
+  }
 })();
 </script>
 

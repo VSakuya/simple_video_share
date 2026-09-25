@@ -1,10 +1,10 @@
 // inpage.js — page-level "fullscreen" overlay (no browser Fullscreen API).
 //
-// A single reusable helper that expands a player element (a native <video>, or
-// a video.js root) into a fixed, viewport-covering overlay. The element is
-// MOVED into the overlay (so a video.js player keeps working) and moved back on
-// exit. Esc or the on-screen exit button closes it. Loaded from base.html so any
-// page can opt in with a [data-inpage-expand] button.
+// A single reusable helper that expands a player element (a native <video>)
+// into a fixed, viewport-covering overlay. The element is MOVED into the
+// overlay and moved back on exit. Esc or the on-screen exit button closes it.
+// Loaded from base.html so any page can opt in with a [data-inpage-expand]
+// button.
 (function () {
   'use strict';
 
@@ -30,6 +30,7 @@
       'stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
       'stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>';
     exitBtn.addEventListener('click', exit);
+
     overlay.appendChild(stage);
     overlay.appendChild(exitBtn);
     document.body.appendChild(overlay);
@@ -45,7 +46,9 @@
     el.classList.add('inpage-overlay__fill');
     overlay.classList.add('is-active');
     active = true;
-    var v = el.querySelector ? el.querySelector('video') : null;
+
+    // Auto-play the underlying <video> (if any) on entry.
+    var v = el.tagName === 'VIDEO' ? el : (el.querySelector ? el.querySelector('video') : null);
     if (v) v.play().catch(function () {});
   }
 

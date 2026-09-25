@@ -31,6 +31,12 @@
     <textarea id="description-input" class="upload-input" placeholder="Add a description" rows="3"></textarea>
   </div>
 
+  <!-- Max FPS cap for the transcode (never exceeds the admin Max FPS = 60) -->
+  <div class="upload-section">
+    <label for="max-fps-input" class="upload-label">Max FPS <span class="muted">(sources above this are capped during transcode; &le; 60)</span></label>
+    <input type="number" id="max-fps-input" class="upload-input upload-input--narrow" min="1" max="60" step="1" value="60">
+  </div>
+
   <!-- Cover -->
   <div id="cover-panel" class="upload-section">
     <label for="cover-input" class="upload-label">Cover <span class="muted">(optional — auto from 60s frame)</span></label>
@@ -150,5 +156,6 @@
 </dialog>
 <script src="{{ url_for('static', filename='vendor/cropper.min.js') }}"></script>
 
+<script>window.SVS_MAX_BITRATE_KBPS = {{ max_bitrate_kbps }};</script>
 <script type="module" src="{{ url_for('static', filename='js/upload.js') }}"></script>
 {% endblock %}

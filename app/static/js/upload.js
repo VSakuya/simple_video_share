@@ -5,7 +5,7 @@
 //      (WebCodecs) when available, else an HTML5 <video> element.
 //   2. Direct pass when there is no clip and all caps are already met;
 //      otherwise transcode with mediabunny (WebCodecs, hardware-accelerated,
-//      AV1 with H.264 fallback, caps: 1080p / 60fps / 5000 kb/s). When
+//      AV1 with H.264 fallback, caps: 1080p / 60fps / admin bitrate). When
 //      WebCodecs is unavailable or the transcode fails, the original file is
 //      passed through so the upload is never lost. Plus an optional clip range.
 //   3. Extract a cover from the 60s frame (mediabunny WebCodecs decode, else
@@ -28,7 +28,21 @@ const SEGMENT_THRESHOLD = 1024 * 1024 * 1024; // split when final size > 1 GB
 const SEGMENT_SIZE = 512 * 1024 * 1024; // 512 MB per part
 const MAX_HEIGHT = 1080;
 const MAX_FPS = 60;
-const MAX_BITRATE_KBPS = 5000;
+// Per-upload FPS cap the user picks in the form (clamped to MAX_FPS). Read live
+// so it can be changed any time before the upload starts.
+function getMaxFps() {
+  const el = $("max-fps-input");
+  const n = el ? parseInt(el.value, 10) : NaN;
+  if (!Number.isFinite(n) || n <= 0) return MAX_FPS;
+  return Math.min(MAX_FPS, n);
+}
+// Bitrate cap (kbps): the admin "default bitrate" setting, exposed by
+// upload.html as window.SVS_MAX_BITRATE_KBPS. Falls back to 5000 when the
+// value is missing or invalid (e.g. page loaded without the server var).
+const MAX_BITRATE_KBPS = (() => {
+  const n = Number(typeof window !== "undefined" ? window.SVS_MAX_BITRATE_KBPS : NaN);
+  return Number.isFinite(n) && n > 0 ? n : 5000;
+})();
 // WebCodecs codec ids, in priority order, used by the mediabunny path.
 // "av1" and "avc" are the ids mediabunny's capability checks understand.
 const WEBCODECS_CODEC_PRIORITY = ["av1", "avc"];
@@ -521,7 +535,7 @@ function needsTranscode() {
   if (clipRange()) return true;
   if (!probeInfo) return true; // unknown caps -> transcode to be safe
   if (probeInfo.height > MAX_HEIGHT) return true;
-  if (probeInfo.fps > MAX_FPS) return true;
+  if (probeInfo.fps > getMaxFps()) return true;
   if (probeInfo.bitrateKbps > MAX_BITRATE_KBPS) return true;
   return false;
 }
@@ -537,7 +551,7 @@ async function processVideo() {
   if (!needsTranscode()) {
     clientLog(
       "info",
-      "Direct pass - no clip and all caps met (height<=1080, fps<=60, bitrate<=5000 kbps); uploading the original file unchanged."
+      "Direct pass - no clip and all caps met (height<=" + MAX_HEIGHT + ", fps<=" + getMaxFps() + ", bitrate<=" + MAX_BITRATE_KBPS + " kbps); uploading the original file unchanged."
     );
     return sourceFile; // direct pass (compliant original)
   }
@@ -548,7 +562,7 @@ async function processVideo() {
   // limit (preserve lower values). When the probe failed (probeInfo null)
   // fall back to the full caps so the 1080p / 5000 kb/s limits are respected.
   const capHeight = probeInfo ? (probeInfo.height > MAX_HEIGHT ? MAX_HEIGHT : 0) : MAX_HEIGHT;
-  const capFps = probeInfo && probeInfo.fps > MAX_FPS ? MAX_FPS : 0;
+  const capFps = probeInfo && probeInfo.fps > getMaxFps() ? getMaxFps() : 0;
   const bitrateKbps = Math.min(
     probeInfo ? probeInfo.bitrateKbps || MAX_BITRATE_KBPS : MAX_BITRATE_KBPS,
     MAX_BITRATE_KBPS
@@ -945,6 +959,22 @@ function setupTimeline(file) {
   // hidden probe/cover <video> elements stay muted.
   updateClipLabels();
 }
+
+// Spacebar toggles play/pause on the preview video (instead of scrolling the
+// page). Only active once a file is loaded and the user isn't typing.
+document.addEventListener("keydown", function (e) {
+  if (e.code !== "Space") return;
+  if (!previewVideo || !previewVideo.src) return;
+  const t = e.target;
+  if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
+  e.preventDefault();
+  // The native <video controls> also toggles play/pause on Space while it has
+  // focus, which double-toggles with ours (the video pauses, then instantly
+  // resumes). Drop focus so only this handler toggles the state.
+  if (document.activeElement === previewVideo) previewVideo.blur();
+  if (previewVideo.paused) previewVideo.play().catch(function () {});
+  else previewVideo.pause();
+});
 
 // ---------------------------------------------------------------------------
 // Upload (single or segmented)

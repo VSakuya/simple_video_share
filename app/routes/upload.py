@@ -13,6 +13,7 @@ Flow (see project_requirements.md, Scenario 1):
    drops the local copy if disk is tight, and enforces the cache-capacity cap.
 """
 
+import hashlib
 import logging
 import os
 import shutil
@@ -48,7 +49,16 @@ def index() -> Any:
     from ..auth import current_user
     me = current_user()
     folders = db.folders_with_depth(me["id"]) if me else []
-    return render_template("upload.html", folders=folders)
+    # The admin "default bitrate" is the client-side transcode bitrate cap.
+    # Expose it to the page so upload.js stops using a hard-coded 5000.
+    settings = db.get_all_settings()
+    try:
+        max_bitrate_kbps = int(settings.get("default_bitrate", "5000"))
+    except (TypeError, ValueError):
+        max_bitrate_kbps = 5000
+    return render_template(
+        "upload.html", folders=folders, max_bitrate_kbps=max_bitrate_kbps
+    )
 
 
 @upload_bp.route("/log", methods=["POST"])
@@ -341,14 +351,12 @@ def _meta_from_form() -> dict[str, Any]:
 
 
 def _unique_video_name(title: str, videos_dir: Path) -> str:
-    base = storage._safe_name(title + ".mp4")
-    name = base
-    counter = 0
-    while (videos_dir / name).exists():
-        stem, ext = os.path.splitext(base)
-        name = f"{stem}_{counter}{ext}"
-        counter += 1
-    return name
+    # Hash the on-disk name (same style as the Drive copy) so two videos with the
+    # same title never collide on disk. The per-upload uuid keeps the name unique
+    # even for identical title pairs; the human title stays in the DB for display.
+    seed = f"{title}|{uuid.uuid4().hex}"
+    digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()
+    return f"{digest[:16]}.mp4"
 
 
 def _rmtree_quiet(path: Path) -> None:

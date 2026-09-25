@@ -43,6 +43,7 @@
            src="{{ url_for('home.avatar_file', filename=video['owner_avatar_filename']) if video['owner_avatar_filename'] else url_for('static', filename='img/avatar-default.svg') }}"
            alt="{{ video['owner_name'] }}" loading="lazy">
       <span class="card__owner muted">{{ video['owner_name'] }}</span>
+      <span class="card__date muted">{{ video['uploaded_at'][:16] if video['uploaded_at'] else '' }}</span>
     </div>
   </a>
   {% else %}

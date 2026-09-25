@@ -10,6 +10,7 @@ Layout
 database, and registers all route blueprints.
 """
 
+import hashlib
 import mimetypes
 from datetime import timedelta
 from pathlib import Path
@@ -69,6 +70,19 @@ def create_app() -> Flask:
     if base_path and not base_path.startswith("/"):
         base_path = "/" + base_path
     app.config["BASE_PATH"] = base_path
+
+    # Cache-busting version for the app's own static assets (inpage.js and
+    # style.css). A content hash computed once at startup lets a browser
+    # re-fetch when a file changes, without manual version bumps. Exposed to
+    # templates as ``static_version``.
+    def _static_version() -> str:
+        chunks = []
+        for rel in ("static/js/inpage.js", "static/css/style.css"):
+            p = _APP_DIR / rel
+            if p.is_file():
+                chunks.append(p.read_bytes())
+        return hashlib.sha256(b"\0".join(chunks)).hexdigest()[:10]
+    app.config["STATIC_VERSION"] = _static_version()
 
 
     # Initialise the database (idempotent) and ensure the bootstrap admin.
@@ -152,6 +166,8 @@ def create_app() -> Flask:
             # "/video"). Lets templates build the few hand-written URLs without
             # url_for. url_for() itself already picks this up via SCRIPT_NAME.
             "svs_base": app.config["BASE_PATH"],
+            # Cache-buster for the app's own static assets (see create_app).
+            "static_version": app.config["STATIC_VERSION"],
         }
 
     @app.before_request

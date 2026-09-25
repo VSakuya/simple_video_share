@@ -14,11 +14,17 @@
         </div>
         <div class="field">
           <label for="setting-default-codec">Default codec</label>
-          <input id="setting-default-codec" type="text" name="default_codec" value="{{ settings.get('default_codec', 'av1') }}">
+          <select id="setting-default-codec" name="default_codec">
+            <option value="av1" {{ 'selected' if settings.get('default_codec', 'av1') == 'av1' else '' }}>AV1</option>
+            <option value="h264" {{ 'selected' if settings.get('default_codec', 'av1') == 'h264' else '' }}>H.264</option>
+          </select>
         </div>
         <div class="field">
           <label for="setting-fallback-codec">Fallback codec</label>
-          <input id="setting-fallback-codec" type="text" name="fallback_codec" value="{{ settings.get('fallback_codec', 'h264') }}">
+          <select id="setting-fallback-codec" name="fallback_codec">
+            <option value="h264" {{ 'selected' if settings.get('fallback_codec', 'h264') == 'h264' else '' }}>H.264</option>
+            <option value="av1" {{ 'selected' if settings.get('fallback_codec', 'h264') == 'av1' else '' }}>AV1</option>
+          </select>
         </div>
         <div class="field">
           <label for="setting-max-resolution">Max resolution</label>
@@ -44,6 +50,32 @@
       </p>
       <button type="submit" class="btn">Save settings</button>
     </form>
+  </section>
+
+  <section class="panel">
+    <h2>Logs</h2>
+    <div class="admin-log-controls">
+      <div class="field">
+        <label for="log-source">Source</label>
+        <select id="log-source" name="log_source">
+          <option value="app">Server (app.log)</option>
+          <option value="client">Browser pipeline (client.log)</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="log-level">Level</label>
+        <select id="log-level" name="log_level">
+          <option value="all">All</option>
+          <option value="INFO">INFO</option>
+          <option value="WARNING">WARNING</option>
+          <option value="ERROR">ERROR</option>
+          <option value="CRITICAL">CRITICAL</option>
+        </select>
+      </div>
+      <button type="button" class="btn btn--ghost" id="log-refresh">Refresh</button>
+    </div>
+    <p class="muted" id="log-status">Loading…</p>
+    <div class="admin-log" id="log-view" aria-live="polite"></div>
   </section>
 
   <div class="panel-grid">
@@ -121,5 +153,65 @@
     </table>
     </div>
   </section>
+
+  <script>
+    // Admin log viewer: fetch the selected log file (filtered by level) and
+    // render it. The server does all filtering; the client only displays.
+    (function () {
+      var view = document.getElementById('log-view');
+      var status = document.getElementById('log-status');
+      var sourceSel = document.getElementById('log-source');
+      var levelSel = document.getElementById('log-level');
+      var refreshBtn = document.getElementById('log-refresh');
+      var logsUrl = (window.SVS_BASE || '') + '{{ url_for("admin.logs") }}';
+
+      function levelClass(level) {
+        if (level === 'WARNING') return 'admin-log__line--warn';
+        if (level === 'ERROR' || level === 'CRITICAL') return 'admin-log__line--error';
+        if (level === 'DEBUG') return 'admin-log__line--debug';
+        return 'admin-log__line--info';
+      }
+
+      function render(data) {
+        view.innerHTML = '';
+        if (!data.lines.length) {
+          status.textContent = 'No log lines match the current filter.';
+          return;
+        }
+        var frag = document.createDocumentFragment();
+        data.lines.forEach(function (line) {
+          var el = document.createElement('div');
+          el.className = 'admin-log__line ' + levelClass(line.level);
+          el.textContent = line.text;
+          frag.appendChild(el);
+        });
+        view.appendChild(frag);
+        var note = 'Showing ' + data.lines.length + ' of ' + data.total + ' matching lines';
+        if (data.truncated) note += ' (most recent only)';
+        status.textContent = note;
+        view.scrollTop = view.scrollHeight;
+      }
+
+      function load() {
+        status.textContent = 'Loading…';
+        fetch(logsUrl + '?source=' + encodeURIComponent(sourceSel.value) +
+              '&level=' + encodeURIComponent(levelSel.value))
+          .then(function (r) {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.json();
+          })
+          .then(render)
+          .catch(function (err) {
+            view.innerHTML = '';
+            status.textContent = 'Failed to load logs: ' + err.message;
+          });
+      }
+
+      sourceSel.addEventListener('change', load);
+      levelSel.addEventListener('change', load);
+      refreshBtn.addEventListener('click', load);
+      load();
+    })();
+  </script>
 </div>
 {% endblock %}

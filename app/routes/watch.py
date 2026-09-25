@@ -1,8 +1,10 @@
 """Watch blueprint: Range streaming + Drive download (P3), and comments (§13.16, §13.20)."""
 
+import hashlib
 import logging
 import os
 import threading
+import uuid
 from pathlib import Path
 from typing import Any, Dict, Set
 from flask import Blueprint, current_app, flash, jsonify, redirect, render_template, request, url_for
@@ -76,20 +78,14 @@ def _is_cached(video: dict[str, Any]) -> bool:
 
 
 def _cached_filename(title: str, videos_dir: str) -> str:
-    """Pick a unique on-disk filename for a freshly downloaded copy (§13.33).
+    """Pick a unique, hash-based on-disk filename for a freshly downloaded copy.
 
-    Mirrors ``routes.upload._unique_video_name``: a safe ``<title>.mp4`` with a
-    numeric suffix while the name is taken.
+    Same style as the upload/Drive naming: a short SHA-256 digest so same-title
+    videos never collide on disk. The uuid keeps it unique per download.
     """
-    from ..storage import _safe_name
-    base = _safe_name(title + ".mp4") or "video.mp4"
-    name = base
-    counter = 0
-    while os.path.exists(os.path.join(videos_dir, name)):
-        stem, ext = os.path.splitext(base)
-        name = f"{stem}_{counter}{ext}"
-        counter += 1
-    return name
+    seed = f"{title}|{uuid.uuid4().hex}"
+    digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()
+    return f"{digest[:16]}.mp4"
 
 
 @watch_bp.route("/<int:video_id>/cache", methods=["POST"])

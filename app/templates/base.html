@@ -15,13 +15,20 @@
       }
       document.documentElement.setAttribute('data-theme', t);
       document.documentElement.style.colorScheme = t;
+      // Apply the sidebar collapse state before first paint so a full page load
+      // never flashes the expanded rail (the collapse choice is per-browser).
+      try {
+        if (localStorage.getItem('sidebar-collapsed') === '1') {
+          document.documentElement.classList.add('sidebar-collapsed');
+        }
+      } catch (e) { /* localStorage unavailable (e.g. private mode) */ }
     })();
   </script>
   <link rel="stylesheet" href="{{ url_for('static', filename='vendor/pico.min.css') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v={{ static_version }}">
   <title>{% block title %}Simple Video Share{% endblock %}</title>
   <script>window.SVS_BASE = "{{ svs_base }}";</script>
-  <script src="{{ url_for('static', filename='js/inpage.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/inpage.js') }}?v={{ static_version }}"></script>
   {% block head %}{% endblock %}
 </head>
 <body>
@@ -128,13 +135,14 @@
       });
 
       // Desktop: collapse the sidebar to an icon-only rail, persist choice.
+      // The class lives on <html> (set pre-paint in <head>), not <body>, so a
+      // full page load never flashes the expanded rail.
       var collapse = document.getElementById('sidebar-collapse');
-      var body = document.body;
-      if (localStorage.getItem('sidebar-collapsed') === '1') body.classList.add('sidebar-collapsed');
+      var root = document.documentElement;
       collapse.addEventListener('click', function () {
-        body.classList.toggle('sidebar-collapsed');
+        root.classList.toggle('sidebar-collapsed');
         localStorage.setItem('sidebar-collapsed',
-          body.classList.contains('sidebar-collapsed') ? '1' : '0');
+          root.classList.contains('sidebar-collapsed') ? '1' : '0');
       });
 
       // Theme toggle (§13.26): flip data-theme and persist to localStorage.

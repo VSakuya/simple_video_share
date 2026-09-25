@@ -20,11 +20,16 @@ from typing import Iterable, Optional
 _APP_DIR = Path(__file__).resolve().parent
 _ROOT_DIR = _APP_DIR.parent
 _LOG_DIR = _ROOT_DIR / "storage" / "logs"
+#: Public handle to the log directory (used by the admin log viewer).
+LOG_DIR = _LOG_DIR
 
 _LOG_FORMAT = "%(asctime)s  %(levelname)-7s  %(name)s: %(message)s"
 _LOG_DATEFMT = "%Y-%m-%d %H:%M:%S"
 _MAX_BYTES = 5 * 1024 * 1024  # rotate each file at 5 MB
 _BACKUPS = 3
+
+#: Set once setup_logging() has wired the handlers (idempotency guard).
+_LOGGING_READY = False
 
 
 def _file_handler(path: Path) -> logging.Handler:
@@ -38,8 +43,9 @@ def _file_handler(path: Path) -> logging.Handler:
 def setup_logging() -> logging.Logger:
     """Configure the application logger. Idempotent (safe to call twice)."""
     _LOG_DIR.mkdir(parents=True, exist_ok=True)
+    global _LOGGING_READY
     app_logger = logging.getLogger("simple_video_share")
-    if getattr(app_logger, "_svs_ready", False):
+    if _LOGGING_READY:
         return app_logger
 
     app_logger.setLevel(logging.INFO)
@@ -55,7 +61,7 @@ def setup_logging() -> logging.Logger:
     client_logger = logging.getLogger("simple_video_share.client")
     client_logger.addHandler(_file_handler(_LOG_DIR / "client.log"))
 
-    app_logger._svs_ready = True
+    _LOGGING_READY = True
     app_logger.info("logging ready (log dir: %s)", _LOG_DIR)
     return app_logger
 

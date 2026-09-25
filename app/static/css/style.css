@@ -172,13 +172,13 @@ table { font-size: 0.88rem; }
 .sidebar__item:has(.sidebar__avatar) .icon { flex: 0 0 28px; }
 
 /* Collapsed (icon-only) state, YouTube-style. */
-body.sidebar-collapsed .sidebar { width: var(--sidebar-w-collapsed); padding: 8px 6px; }
-body.sidebar-collapsed .sidebar__brand,
-body.sidebar-collapsed .sidebar__item .label,
-body.sidebar-collapsed .sidebar__theme-toggle .label { display: none; }
-body.sidebar-collapsed .sidebar__item,
-body.sidebar-collapsed .sidebar__theme-toggle { justify-content: center; padding: 9px 0; }
-body.sidebar-collapsed .main { margin-left: var(--sidebar-w-collapsed); }
+.sidebar-collapsed .sidebar { width: var(--sidebar-w-collapsed); padding: 8px 6px; }
+.sidebar-collapsed .sidebar__brand,
+.sidebar-collapsed .sidebar__item .label,
+.sidebar-collapsed .sidebar__theme-toggle .label { display: none; }
+.sidebar-collapsed .sidebar__item,
+.sidebar-collapsed .sidebar__theme-toggle { justify-content: center; padding: 9px 0; }
+.sidebar-collapsed .main { margin-left: var(--sidebar-w-collapsed); }
 
 .main { margin-left: var(--sidebar-w); }
 .sidebar-overlay { display: none; }
@@ -198,13 +198,13 @@ body.sidebar-collapsed .main { margin-left: var(--sidebar-w-collapsed); }
   }
   .main { margin-left: 0; }
   /* The collapsed-rail state is a desktop concept; the mobile drawer stays wide. */
-  body.sidebar-collapsed .main { margin-left: 0; }
-  body.sidebar-collapsed .sidebar { width: var(--sidebar-w); }
-  body.sidebar-collapsed .sidebar__brand,
-  body.sidebar-collapsed .sidebar__item .label,
-  body.sidebar-collapsed .sidebar__theme-toggle .label { display: block; }
-  body.sidebar-collapsed .sidebar__item,
-  body.sidebar-collapsed .sidebar__theme-toggle { justify-content: flex-start; padding: 9px 12px; }
+  .sidebar-collapsed .main { margin-left: 0; }
+  .sidebar-collapsed .sidebar { width: var(--sidebar-w); }
+  .sidebar-collapsed .sidebar__brand,
+  .sidebar-collapsed .sidebar__item .label,
+  .sidebar-collapsed .sidebar__theme-toggle .label { display: block; }
+  .sidebar-collapsed .sidebar__item,
+  .sidebar-collapsed .sidebar__theme-toggle { justify-content: flex-start; padding: 9px 12px; }
 }
 
 .container { max-width: 92rem; margin: 0 auto; padding: 1.25rem; }
@@ -243,7 +243,7 @@ button:hover { filter: brightness(1.1); }
   text-decoration: none; color: var(--text);
 }
 .card__cover { width: 100%; display: block; }
-.card__title { padding: 8px 10px 0; font-size: 0.9rem; }
+.card__title { padding: 8px 10px 0; font-size: 0.9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card__meta {
   padding: 0 10px 8px;
   font-size: 0.8rem;
@@ -258,7 +258,8 @@ button:hover { filter: brightness(1.1); }
   object-fit: cover;
   flex: 0 0 auto;
 }
-.card__owner { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card__owner { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card__date { flex: 0 0 auto; }
 
 /* Folder cards on the home page (§13.26): a folder is a full-size cell in the
    waterfall, the same size as a video card — the cover area is a folder glyph
@@ -272,7 +273,7 @@ button:hover { filter: brightness(1.1); }
 }
 .folder-card__cover svg { width: 44px; height: 44px; }
 .folder-card__title {
-  padding: 8px 10px; font-size: 0.9rem; font-weight: 600;
+  padding: 8px 10px 28px; font-size: 1rem; font-weight: 600;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
@@ -323,13 +324,14 @@ button:hover { filter: brightness(1.1); }
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
   overflow: hidden;
 }
-#player {
-  display: block;
+/* DPlayer container (§13.39): fills .player-wrap (which carries the
+   aspect-ratio). DPlayer builds .dplayer > .dplayer-video-wrap > <video>, each
+   width/height:100%, so a definite height on #dplayer is all it needs. */
+#dplayer {
   width: 100%;
+  height: 100%;
   background: #000;
-  border-radius: 0;
 }
-#player:fullscreen { border-radius: 0; }
 #caching-status { color: var(--warn-fg); font-weight: 600; margin: 8px 0; }
 
 /* Non-cached video: confirmation + download progress panel (§13.33). */
@@ -353,34 +355,8 @@ button:hover { filter: brightness(1.1); }
 .cache-panel__fill { height: 100%; width: 0; background: var(--accent); transition: width 0.3s; }
 .cache-panel__error { color: #e05a5a; margin: 8px 0 0; }
 
-/* ===== video.js player (§13.26) ===== */
-/* video.js ships its own control styling; we only normalize the wrapper so the
-   big-play-button and controls sit inside the rounded card like a native video. */
-.video-js {
-  width: 100% !important;
-  /* Fill .player-wrap (which carries the aspect-ratio): width:100% + height:100%
-     make the player track the video's ratio for any source with no bars (§13.32).
-     In-page fullscreen adds .inpage-overlay__fill to the SAME element, which also
-     sets height:100% (so the two agree) plus object-fit:contain, so fullscreen
-     still letterboxes correctly. */
-  height: 100% !important;
-  background: #000;
-}
-.video-js .vjs-big-play-button {
-  /* Keep video.js' built-in big-play-button; just make it theme-agnostic. */
-  background: rgba(0, 0, 0, 0.6);
-}
-/* In-page fullscreen button in video.js' bottom control bar (§13.27). It replaces
-   the native fullscreen button (hidden below), because this app uses in-page
-   fullscreen rather than the browser Fullscreen API. */
-.svs-inpage-fs {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-}
-.svs-inpage-fs svg { width: 1.8em; height: 1.8em; }
-.svs-inpage-fs:hover svg { filter: drop-shadow(0 0 0.25em #fff); }
+/* (video.js player + custom in-page fullscreen button CSS removed — the watch
+   page now uses DPlayer with its built-in controls and native fullscreen, §13.39.) */
 
 /* ===== In-page fullscreen overlay (§13.26) ===== */
 /* A fixed, page-level overlay used by the watch page and the upload clip panel.
@@ -409,17 +385,12 @@ button:hover { filter: brightness(1.1); }
   aspect-ratio: auto !important;
   border-radius: 0 !important;
 }
-.inpage-overlay__fill:not(.upload-timeline) video,
-.inpage-overlay__fill:not(.upload-timeline) .video-js video {
+.inpage-overlay__fill:not(.upload-timeline) video {
   width: 100% !important;
   height: 100% !important;
   object-fit: contain;
   background: #000;
 }
-/* Tag-reuse video.js player: the .video-js element IS the <video>, so object-fit
-   must be set on the element itself (the descendant selectors above match a child
-   <video>, which does not exist here). */
-.inpage-overlay__fill.video-js { object-fit: contain; }
 .inpage-overlay__exit {
   position: absolute;
   top: 12px;
@@ -438,18 +409,11 @@ button:hover { filter: brightness(1.1); }
 }
 .inpage-overlay__exit:hover { background: rgba(0, 0, 0, 0.8); }
 .inpage-overlay__exit svg { width: 22px; height: 22px; }
-/* In in-page fullscreen, keep video.js' control bar visible so the progress
-   bar and playback toolbar are always available (bilibili-style). Without this
-   the bar auto-hides (vjs-user-inactive) and stays hidden, leaving only the
-   top-right exit button. */
-.inpage-overlay .vjs-control-bar {
-  visibility: visible !important;
-  opacity: 1 !important;
-}
 
 /* ===== Upload page ===== */
-.upload-page { max-width: 720px; margin: 0 auto; }
+.upload-page { max-width: none; }
 .upload-page h1 { font-size: 1.5rem; margin-bottom: 20px; }
+.upload-input--narrow { max-width: 120px; }
 
 .upload-dropzone {
   border: 2px dashed var(--border-strong);
@@ -672,6 +636,36 @@ button:hover { filter: brightness(1.1); }
 .upload-log__line--warn { color: var(--log-warn); }
 .upload-log__line--error { color: var(--log-error); }
 
+/* Admin log viewer (admin page): a taller monospace log box with per-level
+   coloring, mirroring .upload-log and reusing the --log-* theme vars. */
+.admin-log-controls {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+.admin-log {
+  max-height: 420px;
+  overflow-y: auto;
+  background: var(--log-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-top: 8px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--log-info);
+}
+.admin-log__line {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.admin-log__line--info { color: var(--log-info); }
+.admin-log__line--debug { color: var(--log-debug); }
+.admin-log__line--warn { color: var(--log-warn); }
+.admin-log__line--error { color: var(--log-error); }
+
 .upload-submit {
   background: var(--accent);
   color: #fff;
@@ -697,7 +691,7 @@ button:hover { filter: brightness(1.1); }
 .upload-timeline__video {
   display: block;
   width: 100%;
-  max-height: 420px;
+  max-height: 75vh;
   border-radius: 8px;
   background: #000;
   margin-bottom: 8px;
