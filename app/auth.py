@@ -225,10 +225,18 @@ def avatar() -> Any:
     if f is None:
         flash("No avatar file.", "error")
         return redirect(url_for("auth.account"))
-    name = storage._safe_name(f.filename or "avatar")
     dest = Path(current_app.config["AVATARS_DIR"])
     dest.mkdir(parents=True, exist_ok=True)
-    (dest / name).write_bytes(f.read())
+    name = storage.save_avatar(f, dest)
+    # Remove the previous avatar file (best effort) so UUID names don't orphan.
+    old = me.get("avatar_filename")
+    if old and old != name:
+        old_path = dest / old
+        if old_path.exists():
+            try:
+                old_path.unlink()
+            except OSError:
+                pass
     db.update_user(me["id"], avatar_filename=name)
     flash("Avatar updated.", "success")
     return redirect(url_for("auth.account"))

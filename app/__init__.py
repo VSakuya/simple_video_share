@@ -106,6 +106,7 @@ def create_app() -> Flask:
     # Register blueprints.
     from .auth import auth_bp
     from .routes.home import home_bp
+    from .routes.live import live_bp
     from .routes.upload import upload_bp
     from .routes.watch import watch_bp
     from .routes.user import user_bp
@@ -113,6 +114,7 @@ def create_app() -> Flask:
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(home_bp)
+    app.register_blueprint(live_bp)
     app.register_blueprint(upload_bp)
     app.register_blueprint(watch_bp)
     app.register_blueprint(user_bp)

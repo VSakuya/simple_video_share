@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}{{ room['title'] }} — Live — Simple Video Share{% endblock %}
+{% block head %}
+<!-- DPlayer (§13.39, injects its own CSS/icons) + flv.js (§13.41, vendored,
+     exposes the global `flvjs`). Both are local; no CDN dependency. -->
+<script src="{{ url_for('static', filename='vendor/dplayer/DPlayer.min.js') }}?v={{ static_version }}"></script>
+<script src="{{ url_for('static', filename='vendor/flvjs/flv.min.js') }}?v={{ static_version }}"></script>
+{% endblock %}
+{% block content %}
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  <a href="{{ url_for('live.index') }}">Live</a>
+  <span class="breadcrumb__sep">/</span>
+  <span class="breadcrumb__current">{{ room['title'] }}</span>
+</nav>
+<h1 class="watch-title">{{ room['title'] }}</h1>
+<div class="player-wrap" id="player-wrap">
+  <div id="dplayer"></div>
+</div>
+<script>
+// DPlayer + flv.js live player (§13.41): the same customFlv integration as the
+// reference index.html, adapted to the app. `live: true` gives DPlayer the live
+// UI (no seek bar, LIVE badge); the progress chaser is preserved verbatim.
+(function () {
+  'use strict';
+  var url = {{ room['url'] | tojson }};
+  var flvUrl = url; // the room's stream link (§14.6)
+  var container = document.getElementById('dplayer');
+  var flvPlayer = null;
+  var chaser = undefined;
+
+  var dp = new DPlayer({
+    container: container,
+    autoplay: true,
+    loop: false,
+    live: true,
+    video: {
+      url: flvUrl,
+      type: 'customFlv',
+      customType: {
+        customFlv: function (video, player) {
+          flvPlayer = flvjs.createPlayer({
+            type: 'flv',
+            url: video.src,
+            isLive: true
+          });
+          flvPlayer.attachMediaElement(video);
+          flvPlayer.load();
+
+          // install progress chaser (preserved from the reference): while
+          // playing, jump back to the live edge if we fall >5s behind.
+          if (!chaser) {
+            chaser = setInterval(function () {
+              if (video.buffered.length < 1) return;
+              var delayTime = video.buffered.end(0) - video.currentTime;
+              if (!video.paused && delayTime > 5) {
+                video.currentTime = video.buffered.end(0) - 0.5;
+              }
+            }, 3000);
+          }
+        }
+      }
+    }
+  });
+
+  dp.volume(1);
+  dp.play();
+
+  // patch for mobile (from the reference): toggle the volume 0<->1.
+  if (dp.container.classList.contains('dplayer-mobile')) {
+    dp.container.classList.remove('dplayer-mobile');
+    var volumeBtn = document.querySelector('.dplayer-controller .dplayer-volume');
+    if (volumeBtn) {
+      var volume = 0;
+      volumeBtn.onclick = function () {
+        volume = volume === 0 ? 1 : 0;
+        dp.volume(volume);
+      };
+    }
+  }
+
+  // Clean up on navigation: stop the chaser and destroy the flv.js player.
+  window.addEventListener('beforeunload', function () {
+    if (chaser) clearInterval(chaser);
+    if (flvPlayer) { try { flvPlayer.destroy(); } catch (e) { /* ignore */ } }
+  });
+})();
+</script>
+{% endblock %}

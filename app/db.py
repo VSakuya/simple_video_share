@@ -31,43 +31,70 @@ def _load_schema() -> str:
     return schema_path.read_text(encoding="utf-8")
 
 
+_SQL_DIR = Path(__file__).parent / "sql"
+_sql_cache: dict[str, str] = {}
+
+
+def _sql(feature: str, name: str) -> str:
+    """Return the named query text from ``sql/<feature>/<name>.sql`` (cached).
+
+    All CRUD SQL lives in these files (no hard-coded SQL in code, §14.1). The
+    caller may substitute a ``{placeholder}`` token with a validated value.
+    """
+    key = f"{feature}/{name}"
+    cached = _sql_cache.get(key)
+    if cached is None:
+        cached = (_SQL_DIR / feature / f"{name}.sql").read_text(encoding="utf-8")
+        _sql_cache[key] = cached
+    return cached
+
+
 def _migrate(conn: sqlite3.Connection) -> None:
     """Apply small additive migrations to pre-existing databases (idempotent).
 
     Fresh databases already have these columns from ``sql/schema.sql``; this only
-    back-fills columns on older DBs so a live install does not break.
+    back-fills columns on older DBs so a live install does not break. Each DDL
+    step lives in ``sql/migrations/*.sql`` (§14.1); only the "is the column
+    already there?" check is inlined here.
     """
     cols = {row[1] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
     if "avatar_filename" not in cols:
-        conn.execute("ALTER TABLE users ADD COLUMN avatar_filename TEXT")
+        conn.execute(_sql("migrations", "users_add_avatar"))
     if "must_change_password" not in cols:
-        conn.execute(
-            "ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0"
-        )
+        conn.execute(_sql("migrations", "users_add_must_change"))
 
     video_cols = {row[1] for row in conn.execute("PRAGMA table_info(videos)").fetchall()}
     if "drive_filename" not in video_cols:
-        conn.execute("ALTER TABLE videos ADD COLUMN drive_filename TEXT")
+        conn.execute(_sql("migrations", "videos_add_drive_filename"))
     if "description" not in video_cols:
-        conn.execute("ALTER TABLE videos ADD COLUMN description TEXT")
+        conn.execute(_sql("migrations", "videos_add_description"))
     if "status" not in video_cols:
         # Existing rows were uploaded synchronously (the Drive upload blocked the
         # HTTP request), so every pre-existing video is already 'ready'.
-        conn.execute(
-            "ALTER TABLE videos ADD COLUMN status TEXT NOT NULL DEFAULT 'ready'"
-        )
+        conn.execute(_sql("migrations", "videos_add_status"))
     if "drive_resumable_uri" not in video_cols:
-        conn.execute("ALTER TABLE videos ADD COLUMN drive_resumable_uri TEXT")
+        conn.execute(_sql("migrations", "videos_add_drive_resumable_uri"))
 
     comment_cols = {row[1] for row in conn.execute("PRAGMA table_info(comments)").fetchall()}
     if "parent_id" not in comment_cols:
-        conn.execute("ALTER TABLE comments ADD COLUMN parent_id INTEGER")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_comments_parent ON comments (parent_id)")
+        conn.execute(_sql("migrations", "comments_add_parent"))
+    conn.execute(_sql("migrations", "comments_index_parent"))
 
     folder_cols = {row[1] for row in conn.execute("PRAGMA table_info(folders)").fetchall()}
     if "parent_id" not in folder_cols:
-        conn.execute("ALTER TABLE folders ADD COLUMN parent_id INTEGER")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_folders_parent ON folders (parent_id)")
+        conn.execute(_sql("migrations", "folders_add_parent"))
+    conn.execute(_sql("migrations", "folders_index_parent"))
+
+    # Live rooms: code -> url (§14.6). Old rows keep their stream as
+    # "/live/<code>.flv"; the auto-seeded "VSakuya" example gets a neutral title;
+    # the legacy code column is then dropped (table rebuild).
+    live_cols = {row[1] for row in conn.execute("PRAGMA table_info(live_rooms)").fetchall()}
+    if "url" not in live_cols:
+        conn.execute(_sql("migrations", "live_rooms_add_url"))
+    if "code" in live_cols:
+        conn.execute(_sql("migrations", "live_rooms_code_to_url"))
+        conn.execute(_sql("migrations", "live_rooms_retitle_vsakuya"))
+        conn.executescript(_sql("migrations", "live_rooms_drop_code"))
 
 
 def init_db() -> None:
@@ -77,9 +104,7 @@ def init_db() -> None:
     conn.executescript(_load_schema())
     _migrate(conn)
     # Seed default settings (only if table is empty)
-    cur = conn.execute("SELECT COUNT(*) FROM settings")
-    count = cur.fetchone()[0]
-    if count == 0:
+    if conn.execute(_sql("settings", "count")).fetchone()[0] == 0:
         defaults = {
             "default_bitrate": "5000",
             "default_codec": "av1",
@@ -91,9 +116,13 @@ def init_db() -> None:
             "cache_root": "videos",
             "covers_root": "covers",
         }
-        conn.executemany(
-            "INSERT INTO settings (key, value) VALUES (?, ?)",
-            list(defaults.items()),
+        conn.executemany(_sql("settings", "insert"), list(defaults.items()))
+    # Seed a default live room (only if the table is empty). ``url`` is a neutral
+    # sample stream link (no private room name) per §14.6.
+    if conn.execute(_sql("live_rooms", "list")).fetchone() is None:
+        conn.execute(
+            _sql("live_rooms", "insert"),
+            ("https://example.com/sample.flv", "Sample Live Room", None),
         )
     conn.commit()
     conn.close()
@@ -118,11 +147,10 @@ def create_user(
     """
     conn = get_db()
     if is_admin is None:
-        count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        count = conn.execute(_sql("users", "count")).fetchone()[0]
         is_admin = 1 if count == 0 else 0
     cur = conn.execute(
-        "INSERT INTO users (username, password_hash, is_admin, must_change_password) "
-        "VALUES (?, ?, ?, ?)",
+        _sql("users", "insert"),
         (username, password_hash, is_admin, must_change_password),
     )
     conn.commit()
@@ -153,7 +181,7 @@ def ensure_default_admin() -> None:
 def get_user_by_username(username: str) -> Optional[dict[str, Any]]:
     conn = get_db()
     row = conn.execute(
-        "SELECT * FROM users WHERE username = ?", (username,)
+        _sql("users", "get_by_username"), (username,)
     ).fetchone()
     conn.close()
     return dict(row) if row else None
@@ -162,7 +190,7 @@ def get_user_by_username(username: str) -> Optional[dict[str, Any]]:
 def get_user_by_id(user_id: int) -> Optional[dict[str, Any]]:
     conn = get_db()
     row = conn.execute(
-        "SELECT * FROM users WHERE id = ?", (user_id,)
+        _sql("users", "get_by_id"), (user_id,)
     ).fetchone()
     conn.close()
     return dict(row) if row else None
@@ -170,14 +198,14 @@ def get_user_by_id(user_id: int) -> Optional[dict[str, Any]]:
 
 def list_users() -> list[dict[str, Any]]:
     conn = get_db()
-    rows = conn.execute("SELECT * FROM users ORDER BY id").fetchall()
+    rows = conn.execute(_sql("users", "list")).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
 
 def count_users() -> int:
     conn = get_db()
-    row = conn.execute("SELECT COUNT(*) FROM users").fetchone()
+    row = conn.execute(_sql("users", "count")).fetchone()
     conn.close()
     return int(row[0]) if row else 0
 
@@ -188,14 +216,14 @@ def update_user(user_id: int, **kwargs: Any) -> None:
     sets = ", ".join(f"{k} = ?" for k in kwargs)
     vals = list(kwargs.values()) + [user_id]
     conn = get_db()
-    conn.execute(f"UPDATE users SET {sets} WHERE id = ?", vals)
+    conn.execute(_sql("users", "update").replace("{set_clause}", sets), vals)
     conn.commit()
     conn.close()
 
 
 def delete_user(user_id: int) -> None:
     conn = get_db()
-    conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+    conn.execute(_sql("users", "delete"), (user_id,))
     conn.commit()
     conn.close()
 
@@ -212,17 +240,14 @@ LOGIN_WINDOW_MINUTES = 15
 
 def _prune_old_attempts(conn: sqlite3.Connection) -> None:
     """Drop failed-attempt rows older than a day to keep the table small."""
-    conn.execute(
-        "DELETE FROM login_attempts WHERE attempted_at < datetime('now', '-1 day')"
-    )
+    conn.execute(_sql("login_attempts", "prune"))
 
 
 def record_failed_login(username: str, ip: str) -> None:
     conn = get_db()
     _prune_old_attempts(conn)
     conn.execute(
-        "INSERT INTO login_attempts (username, ip, attempted_at) "
-        "VALUES (?, ?, datetime('now'))",
+        _sql("login_attempts", "insert"),
         (username, ip),
     )
     conn.commit()
@@ -231,7 +256,7 @@ def record_failed_login(username: str, ip: str) -> None:
 
 def clear_failed_logins(username: str) -> None:
     conn = get_db()
-    conn.execute("DELETE FROM login_attempts WHERE username = ?", (username,))
+    conn.execute(_sql("login_attempts", "clear"), (username,))
     conn.commit()
     conn.close()
 
@@ -253,9 +278,7 @@ def login_lockout_seconds(username: str, ip: str) -> int:
     )
     for column, value, limit in checks:
         row = conn.execute(
-            f"SELECT MIN(attempted_at) AS oldest, COUNT(*) AS n "
-            f"FROM login_attempts WHERE {column} = ? "
-            f"AND attempted_at > datetime('now', ?)",
+            _sql("login_attempts", "count_in_window").replace("{column}", column),
             (value, f"-{window} minutes"),
         ).fetchone()
         if row and row["n"] >= limit:
@@ -277,7 +300,7 @@ def login_lockout_seconds(username: str, ip: str) -> int:
 def create_folder(name: str, owner_id: int, parent_id: Optional[int] = None) -> int:
     conn = get_db()
     cur = conn.execute(
-        "INSERT INTO folders (name, owner_id, parent_id) VALUES (?, ?, ?)",
+        _sql("folders", "insert"),
         (name, owner_id, parent_id),
     )
     conn.commit()
@@ -290,7 +313,7 @@ def create_folder(name: str, owner_id: int, parent_id: Optional[int] = None) -> 
 def list_folders(owner_id: int) -> list[dict[str, Any]]:
     conn = get_db()
     rows = conn.execute(
-        "SELECT * FROM folders WHERE owner_id = ? ORDER BY name", (owner_id,)
+        _sql("folders", "list_by_owner"), (owner_id,)
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
@@ -299,7 +322,7 @@ def list_folders(owner_id: int) -> list[dict[str, Any]]:
 def get_folder(folder_id: int) -> Optional[dict[str, Any]]:
     conn = get_db()
     row = conn.execute(
-        "SELECT * FROM folders WHERE id = ?", (folder_id,)
+        _sql("folders", "get_by_id"), (folder_id,)
     ).fetchone()
     conn.close()
     return dict(row) if row is not None else None
@@ -307,7 +330,7 @@ def get_folder(folder_id: int) -> Optional[dict[str, Any]]:
 
 def rename_folder(folder_id: int, new_name: str) -> None:
     conn = get_db()
-    conn.execute("UPDATE folders SET name = ? WHERE id = ?", (new_name, folder_id))
+    conn.execute(_sql("folders", "rename"), (new_name, folder_id))
     conn.commit()
     conn.close()
 
@@ -321,19 +344,19 @@ def delete_folder(folder_id: int) -> None:
     """
     conn = get_db()
     row = conn.execute(
-        "SELECT parent_id FROM folders WHERE id = ?", (folder_id,)
+        _sql("folders", "get_parent"), (folder_id,)
     ).fetchone()
     grandparent = row["parent_id"] if row is not None else None
     if grandparent is None:
         conn.execute(
-            "UPDATE folders SET parent_id = NULL WHERE parent_id = ?", (folder_id,)
+            _sql("folders", "reparent_to_root"), (folder_id,)
         )
     else:
         conn.execute(
-            "UPDATE folders SET parent_id = ? WHERE parent_id = ?",
+            _sql("folders", "reparent"),
             (grandparent, folder_id),
         )
-    conn.execute("DELETE FROM folders WHERE id = ?", (folder_id,))
+    conn.execute(_sql("folders", "delete"), (folder_id,))
     conn.commit()
     conn.close()
 
@@ -342,7 +365,7 @@ def list_root_folders() -> list[dict[str, Any]]:
     """Top-level folders (no parent), across all owners, for the home page."""
     conn = get_db()
     rows = conn.execute(
-        "SELECT * FROM folders WHERE parent_id IS NULL ORDER BY name"
+        _sql("folders", "list_root")
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
@@ -352,7 +375,7 @@ def list_child_folders(folder_id: int) -> list[dict[str, Any]]:
     """Immediate subfolders of ``folder_id``, across all owners."""
     conn = get_db()
     rows = conn.execute(
-        "SELECT * FROM folders WHERE parent_id = ? ORDER BY name", (folder_id,)
+        _sql("folders", "list_children"), (folder_id,)
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
@@ -363,19 +386,11 @@ def list_folder_videos(folder_id: Optional[int]) -> list[dict[str, Any]]:
     conn = get_db()
     if folder_id is None:
         rows = conn.execute(
-            """SELECT v.*, u.username AS owner_name,
-                      u.avatar_filename AS owner_avatar_filename
-               FROM videos v JOIN users u ON v.owner_id = u.id
-               WHERE v.status = 'ready' AND v.folder_id IS NULL
-               ORDER BY v.uploaded_at DESC"""
+            _sql("videos", "list_folder_root")
         ).fetchall()
     else:
         rows = conn.execute(
-            """SELECT v.*, u.username AS owner_name,
-                      u.avatar_filename AS owner_avatar_filename
-               FROM videos v JOIN users u ON v.owner_id = u.id
-               WHERE v.status = 'ready' AND v.folder_id = ?
-               ORDER BY v.uploaded_at DESC""",
+            _sql("videos", "list_folder"),
             (folder_id,),
         ).fetchall()
     conn.close()
@@ -386,7 +401,7 @@ def folders_tree(owner_id: int) -> list[dict[str, Any]]:
     """The owner's folders as a nested list; each item has a ``children`` list."""
     conn = get_db()
     rows = conn.execute(
-        "SELECT * FROM folders WHERE owner_id = ? ORDER BY name", (owner_id,)
+        _sql("folders", "list_by_owner"), (owner_id,)
     ).fetchall()
     conn.close()
     folders = [dict(r) for r in rows]
@@ -452,11 +467,7 @@ def create_video(
 ) -> int:
     conn = get_db()
     cur = conn.execute(
-        """INSERT INTO videos
-           (title, owner_id, folder_id, local_filename, cover_filename,
-            size_bytes, description, duration, resolution, codec, bitrate, fps,
-            google_drive_file_id, drive_path, drive_filename, status)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        _sql("videos", "insert"),
         (title, owner_id, folder_id, local_filename, cover_filename,
          size_bytes, description, duration, resolution, codec, bitrate, fps,
          google_drive_file_id, drive_path, drive_filename, status),
@@ -471,10 +482,7 @@ def create_video(
 def get_video_by_id(video_id: int) -> Optional[dict[str, Any]]:
     conn = get_db()
     row = conn.execute(
-        """SELECT v.*, u.username AS owner_name, u.avatar_filename AS owner_avatar_filename
-           FROM videos v
-           JOIN users u ON v.owner_id = u.id
-           WHERE v.id = ?""",
+        _sql("videos", "get_by_id"),
         (video_id,),
     ).fetchone()
     conn.close()
@@ -484,11 +492,7 @@ def get_video_by_id(video_id: int) -> Optional[dict[str, Any]]:
 def list_all_videos() -> list[dict[str, Any]]:
     conn = get_db()
     rows = conn.execute(
-        """SELECT v.*, u.username AS owner_name, f.name AS folder_name
-           FROM videos v
-           JOIN users u   ON v.owner_id = u.id
-           LEFT JOIN folders f ON v.folder_id = f.id
-           ORDER BY v.uploaded_at DESC"""
+        _sql("videos", "list_all")
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
@@ -503,13 +507,7 @@ def list_public_videos() -> list[dict[str, Any]]:
     """
     conn = get_db()
     rows = conn.execute(
-        """SELECT v.*, u.username AS owner_name, u.avatar_filename AS owner_avatar_filename,
-                  f.name AS folder_name
-           FROM videos v
-           JOIN users u   ON v.owner_id = u.id
-           LEFT JOIN folders f ON v.folder_id = f.id
-           WHERE v.status = 'ready'
-           ORDER BY v.uploaded_at DESC"""
+        _sql("videos", "list_public")
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
@@ -519,7 +517,7 @@ def list_uploading_videos() -> list[dict[str, Any]]:
     """Return videos whose Drive upload has not finished (``status='uploading'``)."""
     conn = get_db()
     rows = conn.execute(
-        "SELECT * FROM videos WHERE status = 'uploading'"
+        _sql("videos", "list_uploading")
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
@@ -533,7 +531,7 @@ def sum_cached_bytes() -> int:
     """
     conn = get_db()
     row = conn.execute(
-        "SELECT COALESCE(SUM(size_bytes), 0) AS total FROM videos WHERE local_filename IS NOT NULL"
+        _sql("videos", "sum_cached_bytes")
     ).fetchone()
     conn.close()
     return int(row["total"]) if row else 0
@@ -542,11 +540,7 @@ def sum_cached_bytes() -> int:
 def list_videos_by_owner(owner_id: int) -> list[dict[str, Any]]:
     conn = get_db()
     rows = conn.execute(
-        """SELECT v.*, f.name AS folder_name
-           FROM videos v
-           LEFT JOIN folders f ON v.folder_id = f.id
-           WHERE v.owner_id = ?
-           ORDER BY v.uploaded_at DESC""",
+        _sql("videos", "list_by_owner"),
         (owner_id,),
     ).fetchall()
     conn.close()
@@ -559,14 +553,14 @@ def update_video(video_id: int, **kwargs: Any) -> None:
     sets = ", ".join(f"{k} = ?" for k in kwargs)
     vals = list(kwargs.values()) + [video_id]
     conn = get_db()
-    conn.execute(f"UPDATE videos SET {sets} WHERE id = ?", vals)
+    conn.execute(_sql("videos", "update").replace("{set_clause}", sets), vals)
     conn.commit()
     conn.close()
 
 
 def delete_video(video_id: int) -> None:
     conn = get_db()
-    conn.execute("DELETE FROM videos WHERE id = ?", (video_id,))
+    conn.execute(_sql("videos", "delete"), (video_id,))
     conn.commit()
     conn.close()
 
@@ -575,7 +569,7 @@ def touch_video(video_id: int) -> None:
     """Update last_accessed timestamp (for LRU eviction)."""
     conn = get_db()
     conn.execute(
-        "UPDATE videos SET last_accessed = datetime('now') WHERE id = ?",
+        _sql("videos", "touch"),
         (video_id,),
     )
     conn.commit()
@@ -587,10 +581,7 @@ def list_lru_cached() -> list[dict[str, Any]]:
     for LRU eviction. Only videos that have a Drive copy are evictable."""
     conn = get_db()
     rows = conn.execute(
-        """SELECT * FROM videos
-           WHERE local_filename IS NOT NULL
-             AND google_drive_file_id IS NOT NULL
-           ORDER BY COALESCE(last_accessed, uploaded_at) ASC"""
+        _sql("videos", "list_lru_cached")
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
@@ -603,7 +594,7 @@ def list_lru_cached() -> list[dict[str, Any]]:
 def get_setting(key: str, default: Optional[str] = None) -> Optional[str]:
     conn = get_db()
     row = conn.execute(
-        "SELECT value FROM settings WHERE key = ?", (key,)
+        _sql("settings", "get"), (key,)
     ).fetchone()
     conn.close()
     if row:
@@ -614,7 +605,7 @@ def get_setting(key: str, default: Optional[str] = None) -> Optional[str]:
 def set_setting(key: str, value: str) -> None:
     conn = get_db()
     conn.execute(
-        "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+        _sql("settings", "upsert"),
         (key, value),
     )
     conn.commit()
@@ -623,7 +614,7 @@ def set_setting(key: str, value: str) -> None:
 
 def get_all_settings() -> dict[str, str]:
     conn = get_db()
-    rows = conn.execute("SELECT key, value FROM settings").fetchall()
+    rows = conn.execute(_sql("settings", "all")).fetchall()
     conn.close()
     return {r["key"]: r["value"] for r in rows}
 
@@ -635,7 +626,7 @@ def get_all_settings() -> dict[str, str]:
 def add_comment(video_id: int, author_id: int, body: str, parent_id: Optional[int] = None) -> int:
     conn = get_db()
     cur = conn.execute(
-        "INSERT INTO comments (video_id, author_id, parent_id, body) VALUES (?, ?, ?, ?)",
+        _sql("comments", "insert"),
         (video_id, author_id, parent_id, body),
     )
     conn.commit()
@@ -650,12 +641,7 @@ def list_comments(video_id: int) -> list[dict[str, Any]]:
     ``comment['replies']``, all ordered oldest-first."""
     conn = get_db()
     rows = conn.execute(
-        """SELECT c.id, c.parent_id, c.body, c.created_at, c.author_id,
-                  u.username, u.avatar_filename
-           FROM comments c
-           JOIN users u ON c.author_id = u.id
-           WHERE c.video_id = ?
-           ORDER BY c.id""",
+        _sql("comments", "list"),
         (video_id,),
     ).fetchall()
     conn.close()
@@ -679,7 +665,7 @@ def list_comments(video_id: int) -> list[dict[str, Any]]:
 
 def get_comment_by_id(comment_id: int) -> Optional[dict[str, Any]]:
     conn = get_db()
-    row = conn.execute("SELECT * FROM comments WHERE id = ?", (comment_id,)).fetchone()
+    row = conn.execute(_sql("comments", "get_by_id"), (comment_id,)).fetchone()
     conn.close()
     return dict(row) if row else None
 
@@ -687,7 +673,75 @@ def get_comment_by_id(comment_id: int) -> Optional[dict[str, Any]]:
 def delete_comment(comment_id: int) -> None:
     """Delete a comment and all of its replies (application-layer cascade)."""
     conn = get_db()
-    conn.execute("DELETE FROM comments WHERE parent_id = ?", (comment_id,))
-    conn.execute("DELETE FROM comments WHERE id = ?", (comment_id,))
+    conn.execute(_sql("comments", "delete_replies"), (comment_id,))
+    conn.execute(_sql("comments", "delete"), (comment_id,))
+    conn.commit()
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Live rooms (§14.6)
+# ---------------------------------------------------------------------------
+
+def list_live_rooms() -> list[dict[str, Any]]:
+    """All live rooms, in creation order (for the live list page)."""
+    conn = get_db()
+    rows = conn.execute(_sql("live_rooms", "list")).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_live_room(room_id: int) -> Optional[dict[str, Any]]:
+    conn = get_db()
+    row = conn.execute(
+        _sql("live_rooms", "get_by_id"), (room_id,)
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def create_live_room(
+    url: str, title: str, cover_filename: Optional[str] = None
+) -> int:
+    conn = get_db()
+    cur = conn.execute(
+        _sql("live_rooms", "insert"),
+        (url, title, cover_filename),
+    )
+    conn.commit()
+    room_id = cur.lastrowid
+    assert room_id is not None
+    conn.close()
+    return room_id
+
+
+def update_live_room(
+    room_id: int,
+    url: Optional[str] = None,
+    title: Optional[str] = None,
+    cover_filename: Optional[str] = None,
+) -> None:
+    """Update a room's stream link, title and/or cover.
+
+    ``None`` means "leave unchanged" (the admin form only sends a cover when a
+    new file was uploaded, otherwise the existing cover is kept).
+    """
+    conn = get_db()
+    if url is not None:
+        conn.execute(_sql("live_rooms", "update_url"), (url, room_id))
+    if title is not None:
+        conn.execute(_sql("live_rooms", "update_title"), (title, room_id))
+    if cover_filename is not None:
+        conn.execute(
+            _sql("live_rooms", "update_cover"),
+            (cover_filename, room_id),
+        )
+    conn.commit()
+    conn.close()
+
+
+def delete_live_room(room_id: int) -> None:
+    conn = get_db()
+    conn.execute(_sql("live_rooms", "delete"), (room_id,))
     conn.commit()
     conn.close()

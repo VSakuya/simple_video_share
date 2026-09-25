@@ -53,6 +53,67 @@
   </section>
 
   <section class="panel">
+    <h2>Live rooms</h2>
+    <p class="muted">The stream link is the full address the player plays from (an internal <code>/live/&lt;code&gt;.flv</code> or any external URL).</p>
+    <form class="live-room-add" method="post" action="{{ url_for('admin.create_live_room') }}" enctype="multipart/form-data">
+      <div class="settings-grid">
+        <div class="field">
+          <label for="lr-url">Stream link</label>
+          <input id="lr-url" name="url" placeholder="e.g. /live/sample.flv or https://host/live.flv" required>
+        </div>
+        <div class="field">
+          <label for="lr-title">Title</label>
+          <input id="lr-title" name="title" required>
+        </div>
+        <div class="field">
+          <label>Cover</label>
+          <div class="upload-cover">
+            <img id="lr-add-cover-preview" class="upload-cover__img hidden" alt="cover preview">
+            <input class="liveroom-cover-input" type="file" name="cover" accept="image/*" hidden
+                   data-preview="#lr-add-cover-preview">
+            <button type="button" class="upload-cover__btn liveroom-cover-btn">Choose &amp; crop cover</button>
+          </div>
+        </div>
+      </div>
+      <button type="submit" class="btn">Add live room</button>
+    </form>
+
+    <div class="live-room-list">
+      {% for room in live_rooms %}
+      <div class="live-room-card">
+        <img class="live-room-card__cover" id="lr-cover-{{ room['id'] }}"
+             src="{{ url_for('home.cover', filename=room['cover_filename']) if room['cover_filename'] else url_for('static', filename='img/placeholder.svg') }}"
+             alt="{{ room['title'] }}">
+        <form method="post" action="{{ url_for('admin.update_live_room', room_id=room['id']) }}" enctype="multipart/form-data">
+          <div class="field">
+            <label>Stream link</label>
+            <input name="url" value="{{ room['url'] }}" required>
+          </div>
+          <div class="field">
+            <label>Title</label>
+            <input name="title" value="{{ room['title'] }}" required>
+          </div>
+          <div class="field">
+            <label>Cover</label>
+            <div class="upload-cover">
+              <input class="liveroom-cover-input" type="file" name="cover" accept="image/*" hidden
+                     data-preview="#lr-cover-{{ room['id'] }}">
+              <button type="button" class="upload-cover__btn liveroom-cover-btn">Choose &amp; crop cover</button>
+            </div>
+          </div>
+          <button type="submit" class="btn btn--sm">Save</button>
+        </form>
+        <form method="post" action="{{ url_for('admin.delete_live_room', room_id=room['id']) }}" data-confirm="Delete live room '{{ room['title'] }}'?">
+          <button type="submit" class="btn btn--danger btn--sm">Delete</button>
+        </form>
+      </div>
+      {% else %}
+      <p class="muted">No live rooms yet.</p>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="panel">
     <h2>Logs</h2>
     <div class="admin-log-controls">
       <div class="field">
@@ -211,6 +272,103 @@
       levelSel.addEventListener('change', load);
       refreshBtn.addEventListener('click', load);
       load();
+    })();
+  </script>
+
+  <!-- Live room cover crop dialog (Cropper.js, mirrors the video cover flow §13.21). -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='vendor/cropper.min.css') }}">
+  <dialog id="live-cover-crop-dialog" class="crop-dialog">
+    <article class="dialog-card">
+      <h2>Crop cover</h2>
+      <img id="live-cover-crop-image" alt="cover crop">
+      <div class="dialog-actions">
+        <button type="button" class="btn" id="live-cover-crop-apply">Crop</button>
+        <button type="button" class="btn btn--ghost" id="live-cover-crop-cancel">Cancel</button>
+      </div>
+    </article>
+  </dialog>
+
+  <script src="{{ url_for('static', filename='vendor/cropper.min.js') }}"></script>
+  <script>
+    // Live room cover picker: choosing a file opens the shared crop dialog;
+    // applying attaches the 16:9 / 1280x720 JPEG to that form's cover input.
+    (function () {
+      var cropDialog = document.getElementById('live-cover-crop-dialog');
+      var cropImage = document.getElementById('live-cover-crop-image');
+      var cropApply = document.getElementById('live-cover-crop-apply');
+      var cropCancel = document.getElementById('live-cover-crop-cancel');
+      var cropper = null;
+      var activeInput = null;
+      var activePreview = null;
+
+      document.querySelectorAll('.liveroom-cover-btn').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var input = btn.parentElement.querySelector('.liveroom-cover-input');
+          if (input) input.click();
+        });
+      });
+
+      document.querySelectorAll('.liveroom-cover-input').forEach(function (input) {
+        input.addEventListener('change', function () {
+          var file = input.files && input.files[0];
+          if (!file) return;
+          activeInput = input;
+          activePreview = document.querySelector(input.dataset.preview);
+          var url = URL.createObjectURL(file);
+          var probe = new Image();
+          probe.onload = function () {
+            cropDialog.showModal();
+            var card = cropDialog.querySelector('.dialog-card');
+            var availW = card.clientWidth - 40;
+            var availH = Math.round(window.innerHeight * 0.6);
+            var w = probe.naturalWidth || 1, h = probe.naturalHeight || 1;
+            var scale = Math.min(1, availW / w, availH / h);
+            var src;
+            if (scale < 1) {
+              var c = document.createElement('canvas');
+              c.width = Math.round(w * scale);
+              c.height = Math.round(h * scale);
+              c.getContext('2d').drawImage(probe, 0, 0, c.width, c.height);
+              src = c.toDataURL('image/png');
+              URL.revokeObjectURL(url);
+            } else {
+              src = url;
+            }
+            cropImage.onload = function () {
+              if (cropper) cropper.destroy();
+              cropper = new Cropper(cropImage, {
+                aspectRatio: 16 / 9,
+                background: true,
+                autoCropArea: 0.8
+              });
+            };
+            cropImage.src = src;
+          };
+          probe.src = url;
+        });
+      });
+
+      cropApply.addEventListener('click', function () {
+        if (!cropper || !activeInput) return;
+        var canvas = cropper.getCroppedCanvas({ width: 1280, height: 720, imageSmoothingQuality: 'high' });
+        canvas.toBlob(function (blob) {
+          if (!blob) return;
+          var f = new File([blob], 'cover.jpg', { type: 'image/jpeg' });
+          var dt = new DataTransfer();
+          dt.items.add(f);
+          activeInput.files = dt.files;
+          if (activePreview) {
+            activePreview.src = URL.createObjectURL(blob);
+            activePreview.classList.remove('hidden');
+          }
+          cropDialog.close();
+        }, 'image/jpeg');
+      });
+
+      cropCancel.addEventListener('click', function () {
+        cropDialog.close();
+        if (activeInput) activeInput.value = '';
+      });
     })();
   </script>
 </div>

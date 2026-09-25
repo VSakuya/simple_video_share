@@ -127,7 +127,7 @@ table { font-size: 0.88rem; }
   font-size: 1.1rem; padding: 8px 12px; margin-bottom: 4px;
   border-radius: 8px; cursor: pointer;
 }
-.sidebar__toggle svg { width: 18px; height: 18px; display: block; margin: 0 auto; }
+.sidebar__toggle svg { width: 1.125rem; height: 1.125rem; display: block; margin: 0 auto; }
 .sidebar__toggle:hover { background: var(--hover); color: var(--text); }
 .sidebar__brand { padding: 14px 12px 10px; font-size: 1rem; }
 .sidebar__brand a { color: var(--text); text-decoration: none; font-weight: 700; }
@@ -137,8 +137,8 @@ table { font-size: 0.88rem; }
   padding: 9px 12px; border-radius: 8px;
   color: var(--muted); text-decoration: none; font-size: 0.9rem;
 }
-.sidebar__item .icon { flex: 0 0 20px; display: inline-flex; align-items: center; justify-content: center; }
-.sidebar__item .icon svg { width: 19px; height: 19px; display: block; }
+.sidebar__item .icon { flex: 0 0 1.25rem; display: inline-flex; align-items: center; justify-content: center; }
+.sidebar__item .icon svg { width: 1.1875rem; height: 1.1875rem; display: block; }
 .sidebar__item:hover { background: var(--hover); color: var(--text); }
 .sidebar__item.is-active { background: var(--active); color: var(--text); font-weight: 600; }
 .sidebar__item--out { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 14px; }
@@ -150,8 +150,8 @@ table { font-size: 0.88rem; }
   background: none; border: none; cursor: pointer;
   width: 100%; font-family: inherit; text-align: left;
 }
-.sidebar__theme-toggle .icon { flex: 0 0 20px; display: inline-flex; align-items: center; justify-content: center; }
-.sidebar__theme-toggle .icon svg { width: 19px; height: 19px; display: block; }
+.sidebar__theme-toggle .icon { flex: 0 0 1.25rem; display: inline-flex; align-items: center; justify-content: center; }
+.sidebar__theme-toggle .icon svg { width: 1.1875rem; height: 1.1875rem; display: block; }
 .sidebar__theme-toggle:hover { background: var(--hover); color: var(--text); }
 /* Bottom-left account + logout group (the avatar replaces the Account icon). */
 .sidebar__footer {
@@ -163,13 +163,13 @@ table { font-size: 0.88rem; }
   gap: 2px;
 }
 .sidebar__avatar {
-  width: 28px; height: 28px;
+  width: 1.75rem; height: 1.75rem;
   border-radius: 50%;
   object-fit: cover;
   display: block;
 }
 /* The Account item's icon slot widens to match the larger avatar. */
-.sidebar__item:has(.sidebar__avatar) .icon { flex: 0 0 28px; }
+.sidebar__item:has(.sidebar__avatar) .icon { flex: 0 0 1.75rem; }
 
 /* Collapsed (icon-only) state, YouTube-style. */
 .sidebar-collapsed .sidebar { width: var(--sidebar-w-collapsed); padding: 8px 6px; }
@@ -180,7 +180,7 @@ table { font-size: 0.88rem; }
 .sidebar-collapsed .sidebar__theme-toggle { justify-content: center; padding: 9px 0; }
 .sidebar-collapsed .main { margin-left: var(--sidebar-w-collapsed); }
 
-.main { margin-left: var(--sidebar-w); }
+.main { margin-left: var(--sidebar-w); min-height: 100vh; display: flex; flex-direction: column; }
 .sidebar-overlay { display: none; }
 
 @media (max-width: 860px) {
@@ -207,7 +207,7 @@ table { font-size: 0.88rem; }
   .sidebar-collapsed .sidebar__theme-toggle { justify-content: flex-start; padding: 9px 12px; }
 }
 
-.container { max-width: 92rem; margin: 0 auto; padding: 1.25rem; }
+.container { max-width: 92rem; width: 100%; margin: 0 auto; padding: 1.25rem; flex: 1 1 auto; }
 h1 { font-size: 1.35rem; }
 h2 { font-size: 1.1rem; }
 .muted { color: var(--muted); }
@@ -803,7 +803,7 @@ button:hover { filter: brightness(1.1); }
 button:disabled { opacity: 0.55; cursor: not-allowed; filter: none; }
 
 /* ===== Account & Admin pages (§13.11) ===== */
-.page { max-width: 900px; margin: 0 auto; }
+.page { max-width: none; }
 
 .panel {
   background: var(--panel);
@@ -1158,3 +1158,22 @@ button:disabled { opacity: 0.55; cursor: not-allowed; filter: none; }
   font-size: 0.9em;
   padding: 4px 6px;
 }
+
+/* ===== Live streaming (§13.41) ===== */
+/* List page: 16:9 cover tile + an "ON AIR" badge (shown by the JS probe). */
+.live-card { position: relative; }
+.live-card .card__cover { aspect-ratio: 16 / 9; object-fit: cover; }
+.live-badge {
+  position: absolute; top: 8px; right: 8px;
+  padding: 2px 8px; border-radius: 4px;
+  background: #e53935; color: #fff;
+  font-size: 0.7rem; font-weight: 700; letter-spacing: 0.05em;
+  display: none; pointer-events: none;
+}
+.live-badge.is-onair { display: inline-block; }
+
+/* Admin: live-room management cards. */
+.live-room-add { margin-bottom: 14px; }
+.live-room-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.live-room-card { background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
+.live-room-card__cover { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 6px; background: #000; display: block; margin-bottom: 10px; }

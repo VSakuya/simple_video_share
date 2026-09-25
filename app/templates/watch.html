@@ -271,7 +271,7 @@
   function refreshTimes(scope) {
     (scope || document).querySelectorAll('.comment__time[data-ts]').forEach(function (el) {
       var d = new Date(el.getAttribute('data-ts').replace(' ', 'T') + 'Z');
-      if (!isNaN(d)) el.textContent = d.toLocaleString();
+      if (!isNaN(d)) el.textContent = d.toLocaleString(undefined, { hour12: false });
     });
   }
 

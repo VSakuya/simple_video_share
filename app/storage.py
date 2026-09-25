@@ -160,6 +160,23 @@ def save_cover(uploaded_file, dest_dir: Path, app_config: dict) -> str:
     return filename
 
 
+def save_avatar(uploaded_file, dest_dir: Path) -> str:
+    """Persist an avatar image under a UUID name (never the client's filename).
+
+    Avatars arrive with the user's original filename; storing that on disk would
+    leak it and let two users share one file. A UUID stem guarantees uniqueness
+    while preserving the image extension. Returns the stored filename.
+    """
+    ext = os.path.splitext(uploaded_file.filename or "")[1].lower()
+    if ext not in (".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"):
+        ext = ".jpg"
+    filename = f"avatar_{uuid.uuid4().hex}{ext}"
+    path = dest_dir / filename
+    with path.open("wb") as fh:
+        shutil.copyfileobj(uploaded_file.stream, fh)
+    return filename
+
+
 def _safe_name(name: str) -> str:
     """Reduce ``name`` to its basename with an alphanumeric-safe stem, keeping
     the original extension. Uniqueness is not guaranteed here; callers may

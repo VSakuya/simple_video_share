@@ -77,3 +77,15 @@ CREATE TABLE IF NOT EXISTS comments (
     FOREIGN KEY (parent_id) REFERENCES comments (id) ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS idx_comments_video ON comments (video_id, id);
+
+-- Live streaming rooms (§13.41, link-based per §14.6). ``url`` is the full
+-- stream link (an internal "/live/<code>.flv" or any external URL); the live
+-- page is /live/<id>. ``cover_filename`` is stored under the shared covers
+-- directory and served by the home.cover route.
+CREATE TABLE IF NOT EXISTS live_rooms (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    url             TEXT,
+    title           TEXT    NOT NULL,
+    cover_filename  TEXT,
+    created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
+);
