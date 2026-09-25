@@ -754,6 +754,8 @@ async function runMediabunny(file, opts) {
     codec: opts.codec,
     quality: new mb.Quality({ bitrate: opts.bitrateKbps * 1000 }), // bitrate is bps
     forceTranscode: true, // re-encode the video (audio stays on copy)
+    hardwareAcceleration: 'prefer-hardware',
+    keyFrameInterval: 300,
   };
   // Caps are applied only when needed (a 0 value means "keep original").
   // When only height is capped, mediabunny auto-computes the width to preserve
