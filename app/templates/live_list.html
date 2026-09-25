@@ -8,37 +8,11 @@
     <img class="card__cover"
          src="{{ url_for('home.cover', filename=room['cover_filename']) if room['cover_filename'] else url_for('static', filename='img/placeholder.svg') }}"
          alt="{{ room['title'] }}" loading="lazy">
-    <span class="live-badge" data-room-id="{{ room['id'] }}">ON AIR</span>
+    <span class="live-badge{% if on_air.get(room['id']) %} is-onair{% endif %}">ON AIR</span>
     <div class="card__title">{{ room['title'] }}</div>
   </a>
   {% else %}
   <p class="muted">No live rooms yet.</p>
   {% endfor %}
 </div>
-<script>
-// Live "on air" badges (§14.7): the server probes each room's stream — a
-// real video or audio FLV tag must arrive, since the media server answers
-// 200 + FLV header even for a non-live room — and reports it via
-// /live/status. The badges never touch the stream URL themselves.
-(function () {
-  'use strict';
-  var badges = Array.prototype.slice.call(document.querySelectorAll('.live-badge'));
-  if (!badges.length) return;
-
-  function refresh() {
-    fetch('{{ url_for("live.status") }}')
-      .then(function (resp) { return resp.ok ? resp.json() : null; })
-      .then(function (data) {
-        if (!data || !data.on_air) return;
-        badges.forEach(function (badge) {
-          badge.classList.toggle('is-onair', !!data.on_air[badge.getAttribute('data-room-id')]);
-        });
-      })
-      .catch(function () { /* keep the last state on a failed poll */ });
-  }
-
-  refresh();
-  setInterval(refresh, 15000); // keep the badges current
-})();
-</script>
 {% endblock %}

@@ -9,15 +9,16 @@ the media server (Node-Media-Server) behind the reverse proxy — either an
 internal ``/live/<code>.flv`` or an external URL. The pages here only render the
 UI and drive the player from ``room.url``.
 
-The ON AIR badge is driven by ``GET /live/status`` (§14.7): the server probes
-every room's stream and reports which rooms are actually pushing.
+The ON AIR badge is probed once, server-side, when the list page renders (§14.7):
+each room's stream is checked in parallel and the badge state is baked into the
+HTML. There is no client-side polling.
 """
 
 import concurrent.futures
 import logging
 from typing import Any
 
-from flask import Blueprint, abort, jsonify, render_template, request
+from flask import Blueprint, abort, render_template, request
 
 from .. import db
 from ..auth import login_required
@@ -33,21 +34,21 @@ _STREAM_USER = "MOYUER"
 _STREAM_PASSWORD = "456456"
 
 
+def _probe(url: str, base: str) -> bool:
+    """Probe one room; a root-relative url is resolved against this host."""
+    if url.startswith("/"):
+        url = base + url.lstrip("/")
+    return probe_stream(url, _STREAM_USER, _STREAM_PASSWORD)
+
+
 @live_bp.route("/")
 @login_required
 def index() -> str:
-    """Layer 1: the list of live rooms (gallery)."""
-    rooms = db.list_live_rooms()
-    return render_template("live_list.html", rooms=rooms)
+    """Layer 1: the list of live rooms (gallery).
 
-
-@live_bp.route("/status")
-@login_required
-def status() -> Any:
-    """On-air status of every room (§14.7).
-
-    Each room is probed in parallel (a video or audio FLV tag must arrive
-    within the probe window); the list page polls this endpoint every 15 s.
+    The ON AIR badge is decided here, once per page load (§14.7): every room is
+    probed in parallel (a video or audio FLV tag must arrive within the probe
+    window) and the result is passed straight to the template.
     """
     rooms = db.list_live_rooms()
     base = request.host_url  # ends with "/"
@@ -55,15 +56,8 @@ def status() -> Any:
         max_workers=max(1, min(8, len(rooms)))
     ) as pool:
         results = list(pool.map(lambda room: _probe(room["url"], base), rooms))
-    on_air = {str(room["id"]): on for room, on in zip(rooms, results)}
-    return jsonify(on_air=on_air)
-
-
-def _probe(url: str, base: str) -> bool:
-    """Probe one room; a root-relative url is resolved against this host."""
-    if url.startswith("/"):
-        url = base + url.lstrip("/")
-    return probe_stream(url, _STREAM_USER, _STREAM_PASSWORD)
+    on_air = {room["id"]: on for room, on in zip(rooms, results)}
+    return render_template("live_list.html", rooms=rooms, on_air=on_air)
 
 
 @live_bp.route("/<int:room_id>")
