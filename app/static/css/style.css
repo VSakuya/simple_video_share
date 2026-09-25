@@ -242,7 +242,14 @@ button:hover { filter: brightness(1.1); }
   background: var(--panel); border-radius: 8px; overflow: hidden;
   text-decoration: none; color: var(--text);
 }
-.card__cover { width: 100%; display: block; }
+.card__cover {
+  width: 100%; display: block; aspect-ratio: 16 / 9; object-fit: cover;
+  /* Data-first (§15.7): a neutral placeholder shows the instant the card's data
+     paints; the cover fades in (.is-loaded on onload) once it is decoded. The
+     fixed 16/9 box means the waterfall never reflows as covers arrive. */
+  background: var(--panel-2); opacity: 0; transition: opacity 0.3s ease;
+}
+.card__cover.is-loaded { opacity: 1; }
 .card__title { padding: 8px 10px 0; font-size: 0.9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card__meta {
   padding: 0 10px 8px;
@@ -1198,7 +1205,6 @@ button:disabled { opacity: 0.55; cursor: not-allowed; filter: none; }
 /* List page: 16:9 cover tile + an "ON AIR" badge (server-side probe, §14.7) +
    an owner row (avatar + username) matching the home video cells (§14.8). */
 .live-card { position: relative; }
-.live-card .card__cover { aspect-ratio: 16 / 9; object-fit: cover; }
 .live-badge {
   position: absolute; top: 8px; right: 8px;
   padding: 2px 8px; border-radius: 4px;

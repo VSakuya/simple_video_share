@@ -18,7 +18,7 @@ from flask import (
 )
 from werkzeug.security import generate_password_hash
 
-from .. import db, storage
+from .. import db, drive, storage
 from ..auth import admin_required, current_user
 from ..log import LOG_DIR
 
@@ -86,9 +86,12 @@ def index() -> str:
     users = db.list_users()
     settings = db.get_all_settings()
     # Real disk free space is an admin-only concern (the home page shows cache
-    # remaining instead, derived from the Max cache cap).
+    # remaining instead, derived from the Max cache cap). The Google Drive account
+    # quota is shown on both the home and admin pages.
     base_dir = os.path.dirname(str(current_app.config["VIDEOS_DIR"]))
     disk_free = storage.free_space_bytes(base_dir)
+    quota = drive.get_drive_quota()
+    drive_free = quota[2] if quota is not None else None
     return render_template(
         "admin.html",
         videos=videos,
@@ -98,6 +101,7 @@ def index() -> str:
         cached_bytes=db.sum_cached_bytes(),
         cache_cap_bytes=storage.max_cache_bytes(current_app.config),
         disk_free_bytes=disk_free,
+        drive_free_bytes=drive_free,
     )
 
 

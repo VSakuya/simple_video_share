@@ -48,6 +48,7 @@
         Cached videos: {{ cached_bytes | human_size }}
         {% if cache_cap_bytes > 0 %} / cap {{ cache_cap_bytes | human_size }}{% else %} (no cap){% endif %}
         <br>Disk free: {{ disk_free_bytes | human_size }}
+        <br>Drive free: {% if drive_free_bytes is not none %}{{ drive_free_bytes | human_size }}{% else %}unknown{% endif %}
       </p>
       <button type="submit" class="btn">Save settings</button>
     </form>

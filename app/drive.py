@@ -147,10 +147,15 @@ def get_drive_quota() -> Optional[Tuple[int, int, int]]:
 
 
 # Short-lived cache so the home page does not re-check the same file on every
-# load. Value: (timestamp, exists). Only definitive results (True/False) are
-# cached; unknown (API error) results are always re-checked.
-_exists_cache: Dict[str, Tuple[float, bool]] = {}
+# load. Value: (timestamp, exists) where exists is True/False (definitive) or
+# None (unknown — the API call failed, e.g. network down). Definitive results
+# are cached for the full TTL; unknown results are cached for a shorter window
+# so an unreachable Drive does not make *every* page load re-time-out (each
+# connect timeout is several seconds and the home page checks files one at a
+# time). Keep-on-unknown is preserved either way.
+_exists_cache: Dict[str, Tuple[float, Optional[bool]]] = {}
 _EXISTS_TTL_SECONDS = 120.0
+_EXISTS_UNKNOWN_TTL_SECONDS = 30.0
 
 
 def exists(file_id: str) -> Optional[bool]:
@@ -162,8 +167,11 @@ def exists(file_id: str) -> Optional[bool]:
     """
     now = time.time()
     cached = _exists_cache.get(file_id)
-    if cached is not None and (now - cached[0]) < _EXISTS_TTL_SECONDS:
-        return cached[1]
+    if cached is not None:
+        cached_ts, cached_value = cached
+        ttl = _EXISTS_TTL_SECONDS if cached_value is not None else _EXISTS_UNKNOWN_TTL_SECONDS
+        if (now - cached_ts) < ttl:
+            return cached_value
     result: Optional[bool]
     try:
         service, http = _service_and_http()
@@ -176,10 +184,10 @@ def exists(file_id: str) -> Optional[bool]:
             result = False
         else:
             logger.warning("drive exists (non-404) failed for %s: %s", file_id, exc)
-            return None
+            result = None
     except Exception as exc:
         logger.warning("drive exists check failed for %s: %s", file_id, exc)
-        return None
+        result = None
     _exists_cache[file_id] = (now, result)
     return result
 

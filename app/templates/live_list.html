@@ -7,7 +7,8 @@
   <a class="card live-card" data-room-id="{{ room['id'] }}" href="{{ url_for('live.view', room_id=room['id']) }}">
     <img class="card__cover"
          src="{{ url_for('home.cover', filename=room['cover_filename']) if room['cover_filename'] else url_for('static', filename='img/placeholder.svg') }}"
-         alt="{{ room['title'] }}" loading="lazy">
+         alt="{{ room['title'] }}" loading="lazy" decoding="async"
+         onload="this.classList.add('is-loaded')">
     <span class="live-badge{% if on_air.get(room['id']) %} is-onair{% endif %}">ON AIR</span>
     <div class="card__title">{{ room['title'] }}</div>
     <div class="card__meta">

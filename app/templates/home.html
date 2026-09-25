@@ -41,7 +41,8 @@
   <a class="card" href="{{ url_for('watch.page', video_id=video['id']) }}">
     <img class="card__cover"
          src="{{ url_for('home.cover', filename=video['cover_filename']) if video['cover_filename'] else url_for('static', filename='img/placeholder.svg') }}"
-         alt="{{ video['title'] }}" loading="lazy">
+         alt="{{ video['title'] }}" loading="lazy" decoding="async"
+         onload="this.classList.add('is-loaded')">
     <div class="card__title">{{ video['title'] }}</div>
     <div class="card__meta">
       <img class="card__avatar"
