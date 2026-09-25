@@ -335,11 +335,16 @@ def _upload_session(
     return response, retries
 
 
-def download_file(file_id: str, dest_path: str) -> str:
-    """Download a Drive file to ``dest_path``. Returns ``dest_path``."""
+def download_file(file_id: str, dest_path: str, progress_cb=None) -> str:
+    """Download a Drive file to ``dest_path``. Returns ``dest_path``.
+
+    ``progress_cb`` (optional) is called as ``progress_cb(transferred, total)``
+    as the bytes arrive (pydrive2's ``GetContentFile`` callback), so the caller
+    can report download progress.
+    """
     drive = get_drive()
     gfile = drive.CreateFile({"id": file_id})
-    gfile.GetContentFile(dest_path)
+    gfile.GetContentFile(dest_path, callback=progress_cb)
     return dest_path
 
 

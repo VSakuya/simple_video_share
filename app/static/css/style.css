@@ -90,6 +90,8 @@ html { font-size: clamp(13px, 0.2vw + 12px, 22px); }
 h1 { font-size: 1.35rem; }
 h2 { font-size: 1.1rem; }
 h3 { font-size: 1rem; }
+/* Watch-page video title: larger than a generic h1 for readability (§13.33). */
+.watch-title { font-size: 1.6rem; font-weight: 700; line-height: 1.25; margin: 0 0 14px; }
 p { font-size: 0.95rem; }
 input, select, textarea { font-size: 0.9rem; padding: 0.45em 0.7em; }
 input[type="file"] { font-size: 0.85rem; }
@@ -161,11 +163,13 @@ table { font-size: 0.88rem; }
   gap: 2px;
 }
 .sidebar__avatar {
-  width: 20px; height: 20px;
+  width: 28px; height: 28px;
   border-radius: 50%;
   object-fit: cover;
   display: block;
 }
+/* The Account item's icon slot widens to match the larger avatar. */
+.sidebar__item:has(.sidebar__avatar) .icon { flex: 0 0 28px; }
 
 /* Collapsed (icon-only) state, YouTube-style. */
 body.sidebar-collapsed .sidebar { width: var(--sidebar-w-collapsed); padding: 8px 6px; }
@@ -328,6 +332,27 @@ button:hover { filter: brightness(1.1); }
 }
 #player:fullscreen { border-radius: 0; }
 #caching-status { color: var(--warn-fg); font-weight: 600; margin: 8px 0; }
+
+/* Non-cached video: confirmation + download progress panel (§13.33). */
+.cache-panel {
+  margin: 0 0 12px;
+  padding: 20px 24px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+}
+.cache-panel__body { max-width: 560px; }
+.cache-panel__msg { margin: 0 0 16px; line-height: 1.5; }
+.cache-panel__actions { display: flex; gap: 10px; }
+.cache-panel__bar {
+  height: 10px;
+  border-radius: 6px;
+  background: var(--border);
+  overflow: hidden;
+  margin: 10px 0;
+}
+.cache-panel__fill { height: 100%; width: 0; background: var(--accent); transition: width 0.3s; }
+.cache-panel__error { color: #e05a5a; margin: 8px 0 0; }
 
 /* ===== video.js player (§13.26) ===== */
 /* video.js ships its own control styling; we only normalize the wrapper so the

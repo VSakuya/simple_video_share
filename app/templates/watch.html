@@ -12,12 +12,114 @@
 {% endblock %}
 {% block content %}
 {% set video_id = video['id'] %}
-<h1>{{ video['title'] }}</h1>
-<div id="caching-status" class="hidden">Caching…</div>
-<div class="player-wrap" id="player-wrap">
+<h1 class="watch-title">{{ video['title'] }}</h1>
+<div class="player-wrap" id="player-wrap" {% if not is_cached %}style="display:none"{% endif %}>
   <video id="player" class="video-js vjs-big-play-centered" controls preload="auto"
          src="{{ url_for('watch.stream', video_id=video['id']) }}"></video>
 </div>
+
+{% if not is_cached %}
+<div id="cache-panel" class="cache-panel">
+  {% if has_drive %}
+  <div id="cache-confirm" class="cache-panel__body">
+    <p class="cache-panel__msg">
+      This video is not cached on this server yet. To play it, the full file will
+      be downloaded from Google Drive first. Depending on its size and your
+      connection, this can take a while.
+    </p>
+    <div class="cache-panel__actions">
+      <button id="cache-cancel" type="button" class="btn btn--ghost">Cancel</button>
+      <button id="cache-start" type="button" class="btn">Download &amp; play</button>
+    </div>
+  </div>
+  <div id="cache-progress" class="cache-panel__body hidden">
+    <p>Downloading… <span id="cache-pct">0</span>%</p>
+    <div class="cache-panel__bar"><div id="cache-bar" class="cache-panel__fill"></div></div>
+    <p id="cache-error" class="cache-panel__error hidden"></p>
+  </div>
+  {% else %}
+  <div class="cache-panel__body">
+    <p>This video is not cached and has no Drive copy available to download.</p>
+  </div>
+  {% endif %}
+</div>
+<script>
+(function () {
+  'use strict';
+  var panel = document.getElementById('cache-panel');
+  var confirmBox = document.getElementById('cache-confirm');
+  var progressBox = document.getElementById('cache-progress');
+  var bar = document.getElementById('cache-bar');
+  var pct = document.getElementById('cache-pct');
+  var errEl = document.getElementById('cache-error');
+  var playerWrap = document.getElementById('player-wrap');
+  var media = document.getElementById('player');
+  var streamUrl = {{ url_for('watch.stream', video_id=video['id']) | tojson }};
+  var startUrl = {{ url_for('watch.start_cache', video_id=video['id']) | tojson }};
+  var statusUrl = {{ url_for('watch.cache_status', video_id=video['id']) | tojson }};
+  var homeUrl = {{ url_for('home.index') | tojson }};
+  var poll = null;
+
+  function showProgress() {
+    if (confirmBox) confirmBox.classList.add('hidden');
+    if (progressBox) progressBox.classList.remove('hidden');
+  }
+  function showErr(msg) {
+    if (errEl) { errEl.textContent = msg; errEl.classList.remove('hidden'); }
+  }
+  function done() {
+    if (poll) { clearInterval(poll); poll = null; }
+    if (panel) panel.classList.add('hidden');
+    if (playerWrap) playerWrap.style.display = '';
+    if (media) media.load();   // re-fetch the now-available stream
+  }
+  function check() {
+    fetch(statusUrl)
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (j.cached) { done(); return; }
+        if (j.error) {
+          if (poll) { clearInterval(poll); poll = null; }
+          showProgress();
+          showErr(j.error);
+          return;
+        }
+        var p = (j.total > 0) ? (j.transferred / j.total * 100) : 0;
+        if (bar) bar.style.width = p.toFixed(1) + '%';
+        if (pct) pct.textContent = String(Math.floor(p));
+      })
+      .catch(function () { /* transient: keep polling */ });
+  }
+
+  document.getElementById('cache-cancel').addEventListener('click', function () {
+    window.location.href = homeUrl;
+  });
+  document.getElementById('cache-start').addEventListener('click', function () {
+    fetch(startUrl, { method: 'POST' })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        showProgress();
+        if (!j.ok) { showErr(j.error || 'Could not start the download.'); return; }
+        if (j.error) { showErr(j.error); return; }
+        if (j.cached) { done(); return; }
+        poll = setInterval(check, 1000);
+        check();
+      })
+      .catch(function (e) { showProgress(); showErr('Could not start the download: ' + e); });
+  });
+
+  // On load, resume if a download is already in flight (e.g. after a reload).
+  fetch(statusUrl)
+    .then(function (r) { return r.json(); })
+    .then(function (j) {
+      if (j.cached) { done(); return; }
+      if (j.error) { showProgress(); showErr(j.error); return; }
+      if (j.active) { showProgress(); poll = setInterval(check, 1000); check(); }
+    })
+    .catch(function () { /* ignore */ });
+})();
+</script>
+{% endif %}
 <script>
 // video.js player: match the box to the video's aspect ratio (no letterbox) and
 // move in-page fullscreen into the bottom control bar (§13.27).

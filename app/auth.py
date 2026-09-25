@@ -42,11 +42,22 @@ def current_user() -> Optional[dict[str, Any]]:
     return db.get_user_by_id(user_id)
 
 
+def _full_path(path: str) -> str:
+    """Return the full mounted path for an app-relative ``path``.
+
+    The reverse proxy strips the mount prefix (e.g. ``/video``), so ``request.path``
+    is app-relative. The post-login redirect target must be the full mounted path,
+    or the user lands on the domain root instead of ``/video``. ``request.script_root``
+    is the recorded ``SCRIPT_NAME`` (empty when served from the root).
+    """
+    return request.script_root + path
+
+
 def login_required(view: Callable) -> Callable:
     @wraps(view)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
         if current_user() is None:
-            return redirect(url_for("auth.login", next=request.path))
+            return redirect(url_for("auth.login", next=_full_path(request.path)))
         return view(*args, **kwargs)
     return wrapper
 
@@ -56,7 +67,7 @@ def admin_required(view: Callable) -> Callable:
     def wrapper(*args: Any, **kwargs: Any) -> Any:
         user = current_user()
         if user is None:
-            return redirect(url_for("auth.login", next=request.path))
+            return redirect(url_for("auth.login", next=_full_path(request.path)))
         if not user.get("is_admin"):
             from flask import abort
             abort(403)
