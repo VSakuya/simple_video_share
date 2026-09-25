@@ -19,7 +19,7 @@ import logging
 from pathlib import Path
 from typing import Any, Optional
 
-from flask import Blueprint, abort, current_app, flash, redirect, render_template, request, url_for
+from flask import Blueprint, abort, current_app, flash, jsonify, redirect, render_template, request, url_for
 
 from .. import db, storage
 from ..auth import current_user, login_required
@@ -62,23 +62,45 @@ def _delete_cover_file(filename: str) -> None:
             logger.warning("live: could not delete cover file %s", filename)
 
 
-@live_bp.route("/")
-@login_required
-def index() -> str:
-    """Layer 1: the list of live rooms (gallery).
+def _on_air_map(rooms: list[dict[str, Any]]) -> dict[int, bool]:
+    """Probe every room in parallel and return ``{room_id: is_on_air}``.
 
-    The ON AIR badge is decided here, once per page load (§14.7): every room is
-    probed in parallel (a video or audio FLV tag must arrive within the probe
-    window) and the result is passed straight to the template.
+    A root-relative stream url is resolved against this host (§14.7); each probe
+    reads for up to ``PROBE_TIMEOUT`` seconds, so the whole map takes ~one window.
     """
-    rooms = db.list_live_rooms()
     base = request.host_url  # ends with "/"
     with concurrent.futures.ThreadPoolExecutor(
         max_workers=max(1, min(8, len(rooms)))
     ) as pool:
         results = list(pool.map(lambda room: _probe(room["url"], base), rooms))
-    on_air = {room["id"]: on for room, on in zip(rooms, results)}
-    return render_template("live_list.html", rooms=rooms, on_air=on_air)
+    return {room["id"]: on for room, on in zip(rooms, results)}
+
+
+@live_bp.route("/")
+@login_required
+def index() -> str:
+    """Layer 1: the list of live rooms (gallery).
+
+    The page renders **instantly** with every ON AIR badge off (§14.9); the badge
+    state is fetched in the background by the client from ``GET /live/onair``.
+    Probing here (up to 6 s per room) used to block the whole page load.
+    """
+    rooms = db.list_live_rooms()
+    return render_template("live_list.html", rooms=rooms, on_air={})
+
+
+@live_bp.route("/onair")
+@login_required
+def onair() -> Any:
+    """Background on-air probe (§14.9): JSON ``{room_id: is_on_air}``.
+
+    Fetched by the list page *after* it loads, so the page renders instantly and
+    the badges light up a few seconds later. The probe stays server-side (§14.7)
+    because the stream server sits behind Apache Basic auth.
+    """
+    rooms = db.list_live_rooms()
+    on_air = _on_air_map(rooms)
+    return jsonify({str(room_id): on for room_id, on in on_air.items()})
 
 
 @live_bp.route("/<int:room_id>")

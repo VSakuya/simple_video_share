@@ -4,7 +4,7 @@
 <h1>Live</h1>
 <div class="waterfall" id="live-waterfall">
   {% for room in rooms %}
-  <a class="card live-card" href="{{ url_for('live.view', room_id=room['id']) }}">
+  <a class="card live-card" data-room-id="{{ room['id'] }}" href="{{ url_for('live.view', room_id=room['id']) }}">
     <img class="card__cover"
          src="{{ url_for('home.cover', filename=room['cover_filename']) if room['cover_filename'] else url_for('static', filename='img/placeholder.svg') }}"
          alt="{{ room['title'] }}" loading="lazy">
@@ -21,4 +21,23 @@
   <p class="muted">No live rooms yet.</p>
   {% endfor %}
 </div>
+<script>
+// ON AIR badge (§14.9): the page renders instantly with every badge off; after
+// load we fetch the background probe result and light up the rooms that are live.
+(function () {
+  'use strict';
+  var cards = document.querySelectorAll('.live-card');
+  if (!cards.length) return;
+  fetch('{{ url_for("live.onair") }}')
+    .then(function (r) { return r.ok ? r.json() : {}; })
+    .then(function (onair) {
+      cards.forEach(function (card) {
+        if (!onair[card.dataset.roomId]) return;
+        var badge = card.querySelector('.live-badge');
+        if (badge) badge.classList.add('is-onair');
+      });
+    })
+    .catch(function () { /* stay off; the next page load re-probes */ });
+})();
+</script>
 {% endblock %}
