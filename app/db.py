@@ -95,6 +95,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute(_sql("migrations", "live_rooms_code_to_url"))
         conn.execute(_sql("migrations", "live_rooms_retitle_vsakuya"))
         conn.executescript(_sql("migrations", "live_rooms_drop_code"))
+    # Per-user live rooms + description (§14.8).
+    if "description" not in live_cols:
+        conn.execute(_sql("migrations", "live_rooms_add_description"))
+    if "owner_id" not in live_cols:
+        conn.execute(_sql("migrations", "live_rooms_add_owner_id"))
 
 
 def init_db() -> None:
@@ -118,11 +123,12 @@ def init_db() -> None:
         }
         conn.executemany(_sql("settings", "insert"), list(defaults.items()))
     # Seed a default live room (only if the table is empty). ``url`` is a neutral
-    # sample stream link (no private room name) per §14.6.
+    # sample stream link (no private room name) per §14.6. The sample room has no
+    # owner (it is not a user's room).
     if conn.execute(_sql("live_rooms", "list")).fetchone() is None:
         conn.execute(
             _sql("live_rooms", "insert"),
-            ("https://example.com/sample.flv", "Sample Live Room", None),
+            ("https://example.com/sample.flv", "Sample Live Room", None, None, None),
         )
     conn.commit()
     conn.close()
@@ -700,13 +706,25 @@ def get_live_room(room_id: int) -> Optional[dict[str, Any]]:
     return dict(row) if row else None
 
 
+def get_live_room_by_owner(owner_id: int) -> Optional[dict[str, Any]]:
+    """A user's own live room (at most one), or None."""
+    conn = get_db()
+    row = conn.execute(_sql("live_rooms", "get_by_owner"), (owner_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
 def create_live_room(
-    url: str, title: str, cover_filename: Optional[str] = None
+    url: str,
+    title: str,
+    owner_id: Optional[int] = None,
+    description: Optional[str] = None,
+    cover_filename: Optional[str] = None,
 ) -> int:
     conn = get_db()
     cur = conn.execute(
         _sql("live_rooms", "insert"),
-        (url, title, cover_filename),
+        (url, title, description, owner_id, cover_filename),
     )
     conn.commit()
     room_id = cur.lastrowid
@@ -719,18 +737,21 @@ def update_live_room(
     room_id: int,
     url: Optional[str] = None,
     title: Optional[str] = None,
+    description: Optional[str] = None,
     cover_filename: Optional[str] = None,
 ) -> None:
-    """Update a room's stream link, title and/or cover.
+    """Update a room's stream link, title, description and/or cover.
 
-    ``None`` means "leave unchanged" (the admin form only sends a cover when a
-    new file was uploaded, otherwise the existing cover is kept).
+    ``None`` means "leave unchanged" (a cover is only sent when a new file was
+    uploaded, otherwise the existing cover is kept).
     """
     conn = get_db()
     if url is not None:
         conn.execute(_sql("live_rooms", "update_url"), (url, room_id))
     if title is not None:
         conn.execute(_sql("live_rooms", "update_title"), (title, room_id))
+    if description is not None:
+        conn.execute(_sql("live_rooms", "update_description"), (description, room_id))
     if cover_filename is not None:
         conn.execute(
             _sql("live_rooms", "update_cover"),

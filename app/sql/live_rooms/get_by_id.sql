@@ -1,1 +1,6 @@
-SELECT * FROM live_rooms WHERE id = ?
+SELECT lr.id, lr.url, lr.title, lr.description, lr.owner_id,
+       lr.cover_filename, lr.created_at,
+       u.username AS owner_username, u.avatar_filename AS owner_avatar
+FROM live_rooms lr
+LEFT JOIN users u ON u.id = lr.owner_id
+WHERE lr.id = ?

@@ -1,6 +1,7 @@
 """Admin blueprint: manage all videos/users + global settings (P6)."""
 
 import logging
+import os
 import re
 from pathlib import Path
 from typing import Any, Optional
@@ -54,15 +55,6 @@ _LOG_LINE_RE = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\s+([A-Z]+)")
 #: Cap on how many matching lines a single request returns (newest last).
 _MAX_LOG_LINES = 2000
 
-#: A live-room stream link must be a full URL (``http(s)://...``) or a path on
-#: the same host (``/live/<code>.flv``). Anything else is rejected (§14.6).
-def _valid_live_url(url: str) -> bool:
-    if not url:
-        return False
-    if url.startswith("/"):
-        return True
-    return url.startswith("http://") or url.startswith("https://")
-
 
 def _read_filtered_log(path, level: str) -> list[dict[str, str]]:
     """Read ``path`` and return the lines matching ``level`` (newest last).
@@ -93,6 +85,10 @@ def index() -> str:
     videos = db.list_all_videos()
     users = db.list_users()
     settings = db.get_all_settings()
+    # Real disk free space is an admin-only concern (the home page shows cache
+    # remaining instead, derived from the Max cache cap).
+    base_dir = os.path.dirname(str(current_app.config["VIDEOS_DIR"]))
+    disk_free = storage.free_space_bytes(base_dir)
     return render_template(
         "admin.html",
         videos=videos,
@@ -101,6 +97,7 @@ def index() -> str:
         live_rooms=db.list_live_rooms(),
         cached_bytes=db.sum_cached_bytes(),
         cache_cap_bytes=storage.max_cache_bytes(current_app.config),
+        disk_free_bytes=disk_free,
     )
 
 
@@ -124,57 +121,6 @@ def save_settings() -> Any:
             value = str(int(value) * 1024 * 1024)
         db.set_setting(key, value)
     flash("Settings saved.", "success")
-    return redirect(url_for("admin.index"))
-
-
-@admin_bp.route("/live-rooms", methods=["POST"])
-@admin_required
-def create_live_room() -> Any:
-    """Admin adds a live room (stream link + title + optional cover)."""
-    url = (request.form.get("url") or "").strip()
-    title = (request.form.get("title") or "").strip()
-    cover = request.files.get("cover")
-    cover_filename = None
-    if cover is not None and cover.filename:
-        cover_filename = storage.save_cover(
-            cover, Path(current_app.config["COVERS_DIR"]), current_app.config
-        )
-    if not _valid_live_url(url):
-        flash("Stream link must be a full URL or a path starting with /.", "error")
-    elif not title:
-        flash("Room title is required.", "error")
-    else:
-        db.create_live_room(url, title, cover_filename)
-        flash(f"Live room '{title}' created.", "success")
-    return redirect(url_for("admin.index"))
-
-
-@admin_bp.route("/live-rooms/<int:room_id>", methods=["POST"])
-@admin_required
-def update_live_room(room_id: int) -> Any:
-    """Admin edits a room's stream link, title and/or cover."""
-    room = db.get_live_room(room_id)
-    if room is None:
-        flash("Room not found.", "error")
-        return redirect(url_for("admin.index"))
-    url = (request.form.get("url") or "").strip()
-    title = (request.form.get("title") or "").strip()
-    cover = request.files.get("cover")
-    new_cover = None
-    if cover is not None and cover.filename:
-        new_cover = storage.save_cover(
-            cover, Path(current_app.config["COVERS_DIR"]), current_app.config
-        )
-    if not _valid_live_url(url):
-        flash("Stream link must be a full URL or a path starting with /.", "error")
-        return redirect(url_for("admin.index"))
-    if not title:
-        flash("Room title is required.", "error")
-        return redirect(url_for("admin.index"))
-    if new_cover and room.get("cover_filename"):
-        _delete_cover_file(room["cover_filename"])
-    db.update_live_room(room_id, url=url, title=title, cover_filename=new_cover)
-    flash("Live room updated.", "success")
     return redirect(url_for("admin.index"))
 
 

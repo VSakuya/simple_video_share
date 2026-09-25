@@ -10,6 +10,12 @@
          alt="{{ room['title'] }}" loading="lazy">
     <span class="live-badge{% if on_air.get(room['id']) %} is-onair{% endif %}">ON AIR</span>
     <div class="card__title">{{ room['title'] }}</div>
+    <div class="card__meta">
+      <img class="card__avatar"
+           src="{{ url_for('home.avatar_file', filename=room['owner_avatar']) if room['owner_avatar'] else url_for('static', filename='img/avatar-default.svg') }}"
+           alt="{{ room['owner_username'] or 'Unknown' }}" loading="lazy">
+      <span class="card__owner muted">{{ room['owner_username'] or 'Unknown' }}</span>
+    </div>
   </a>
   {% else %}
   <p class="muted">No live rooms yet.</p>

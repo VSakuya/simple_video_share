@@ -527,6 +527,22 @@ button:hover { filter: brightness(1.1); }
   margin-top: 4px;
   font-variant-numeric: tabular-nums;
 }
+/* Multi-file queue (main upload page). Each row shows a video's name, size,
+   and live status; the shared progress panel above shows the current file's bar. */
+.upload-queue { display: flex; flex-direction: column; gap: 6px; }
+.upload-queue:empty { display: none; }
+.upload-queue__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border: 1px solid var(--bar-bg, rgba(127, 127, 127, 0.3));
+  border-radius: 6px;
+}
+.upload-queue__name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.upload-queue__meta { flex: 0 0 auto; font-size: 0.85rem; }
+.upload-queue__status { flex: 0 0 auto; text-align: right; min-width: 130px; font-size: 0.85rem; }
+.upload-queue__status--error { color: var(--log-error, #c0392b); }
 .upload-warning {
   margin-top: 8px;
   padding: 10px 12px;
@@ -679,6 +695,25 @@ button:hover { filter: brightness(1.1); }
   margin: 24px auto 0;
 }
 .upload-submit:hover { filter: brightness(1.15); }
+
+/* Prominent CTA: the clip-editor entry (upload page) and back-to-upload button
+   (clip editor). A big pill button so both are obvious (bugs.md L40). */
+.upload-cta {
+  display: inline-block;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  padding: 12px 28px;
+  border-radius: 999px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  /* Give the button breathing room from the drop zone directly below it
+     (bugs.md L40: the big button was too close to the elements underneath). */
+  margin-bottom: 24px;
+}
+.upload-cta:hover { filter: brightness(1.15); }
 
 .upload-footer { text-align: center; margin-top: 24px; font-size: 0.85rem; }
 
@@ -1159,8 +1194,9 @@ button:disabled { opacity: 0.55; cursor: not-allowed; filter: none; }
   padding: 4px 6px;
 }
 
-/* ===== Live streaming (§13.41) ===== */
-/* List page: 16:9 cover tile + an "ON AIR" badge (set by the server-side probe, §14.7). */
+/* ===== Live streaming (§13.41, per-user rooms §14.8) ===== */
+/* List page: 16:9 cover tile + an "ON AIR" badge (server-side probe, §14.7) +
+   an owner row (avatar + username) matching the home video cells (§14.8). */
 .live-card { position: relative; }
 .live-card .card__cover { aspect-ratio: 16 / 9; object-fit: cover; }
 .live-badge {
@@ -1172,8 +1208,16 @@ button:disabled { opacity: 0.55; cursor: not-allowed; filter: none; }
 }
 .live-badge.is-onair { display: inline-block; }
 
-/* Admin: live-room management cards. */
-.live-room-add { margin-bottom: 14px; }
+/* Live view page (§14.8): the streamer's avatar + username and the room
+   description sit between the title and the player. */
+.live-view__author { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; }
+.live-view__avatar { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; flex: 0 0 auto; }
+.live-view__name { font-size: 1.05rem; font-weight: 600; }
+.live-view__description { margin: 0 0 16px; color: var(--muted); font-size: 0.92rem; line-height: 1.5; }
+
+/* Admin: live-room cards (delete-only — rooms are managed by their owner). */
 .live-room-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
 .live-room-card { background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
 .live-room-card__cover { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 6px; background: #000; display: block; margin-bottom: 10px; }
+.live-room-card__title { font-size: 0.9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 2px; }
+.live-room-card__owner { font-size: 0.8rem; margin-bottom: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -16,7 +16,12 @@
 {% endif %}
 <h1>{{ current_folder['name'] if current_folder else 'All videos' }}</h1>
 <p class="muted">
-  Free space — local: {{ local_free_bytes | human_size }}
+  Cache: {{ cached_bytes | human_size }}
+  {% if cache_cap_bytes > 0 %}
+    of {{ cache_cap_bytes | human_size }} ({{ cache_remaining_bytes | human_size }} left)
+  {% else %}
+    (no cap)
+  {% endif %}
   {% if drive_free_bytes is not none %}
     | Drive: {{ drive_free_bytes | human_size }}
   {% else %}
@@ -43,11 +48,28 @@
            src="{{ url_for('home.avatar_file', filename=video['owner_avatar_filename']) if video['owner_avatar_filename'] else url_for('static', filename='img/avatar-default.svg') }}"
            alt="{{ video['owner_name'] }}" loading="lazy">
       <span class="card__owner muted">{{ video['owner_name'] }}</span>
-      <span class="card__date muted">{{ video['uploaded_at'][:16] if video['uploaded_at'] else '' }}</span>
+      <span class="card__date muted" data-ts="{{ video['uploaded_at'] if video['uploaded_at'] else '' }}"></span>
     </div>
   </a>
   {% else %}
   <p class="muted">No videos{% if current_folder %} in this folder{% endif %} yet.</p>
   {% endfor %}
 </div>
+<script>
+  // The upload time is stored as UTC (SQLite datetime('now')). Convert each
+  // card's data-ts ("YYYY-MM-DD HH:MM:SS", UTC) to the viewer's local timezone
+  // so the home page shows local time instead of raw UTC.
+  (function () {
+    function pad(n) { return String(n).padStart(2, "0"); }
+    document.querySelectorAll(".card__date[data-ts]").forEach(function (el) {
+      var raw = el.getAttribute("data-ts");
+      if (!raw) return;
+      var d = new Date(raw.replace(" ", "T") + "Z");
+      if (isNaN(d.getTime())) { el.textContent = raw.slice(0, 16); return; }
+      el.textContent =
+        d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) +
+        " " + pad(d.getHours()) + ":" + pad(d.getMinutes());
+    });
+  })();
+</script>
 {% endblock %}

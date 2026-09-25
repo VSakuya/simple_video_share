@@ -53,6 +53,25 @@
   var homeUrl = {{ url_for('home.index') | tojson }};
   var poll = null;
 
+  // Spacebar toggles play/pause on the player (instead of scrolling the page),
+  // mirroring the upload page. DPlayer's own hotkey is disabled (hotkey: false)
+  // so this is the single, focus-independent handler. Ignored while the user is
+  // typing in a comment field (input / textarea / contenteditable).
+  document.addEventListener('keydown', function (e) {
+    if (e.code !== 'Space') return;
+    var ae = document.activeElement;
+    if (ae) {
+      var tag = ae.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || ae.isContentEditable) return;
+    }
+    e.preventDefault();
+    var v = document.querySelector('#dplayer video');
+    if (!v) return;
+    if (document.activeElement === v) v.blur();
+    if (v.paused) v.play().catch(function () {});
+    else v.pause();
+  });
+
   function showProgress() {
     if (confirmBox) confirmBox.classList.add('hidden');
     if (progressBox) progressBox.classList.remove('hidden');
@@ -137,6 +156,7 @@
       container: container,
       autoplay: false,
       loop: false,
+      hotkey: false, // page-level keydown owns Space (avoids a double-toggle)
       video: { url: streamUrl, type: 'video', pic: coverUrl }
     });
 

@@ -210,5 +210,104 @@
       });
     })();
   </script>
+
+  <!-- Live room cover crop dialog (Cropper.js, mirrors the video cover flow §13.21).
+       Shared by every page carrying .liveroom-cover-btn / .liveroom-cover-input
+       (admin + account). On pages without those elements the wiring is a no-op. -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='vendor/cropper.min.css') }}">
+  <dialog id="live-cover-crop-dialog" class="crop-dialog">
+    <article class="dialog-card">
+      <h2>Crop cover</h2>
+      <img id="live-cover-crop-image" alt="cover crop">
+      <div class="dialog-actions">
+        <button type="button" class="btn" id="live-cover-crop-apply">Crop</button>
+        <button type="button" class="btn btn--ghost" id="live-cover-crop-cancel">Cancel</button>
+      </div>
+    </article>
+  </dialog>
+  <script src="{{ url_for('static', filename='vendor/cropper.min.js') }}"></script>
+  <script>
+    // Live room cover picker: choosing a file opens the shared crop dialog;
+    // applying attaches the 16:9 / 1280x720 JPEG to that form's cover input.
+    (function () {
+      var cropDialog = document.getElementById('live-cover-crop-dialog');
+      if (!cropDialog) return;
+      var cropImage = document.getElementById('live-cover-crop-image');
+      var cropApply = document.getElementById('live-cover-crop-apply');
+      var cropCancel = document.getElementById('live-cover-crop-cancel');
+      var cropper = null;
+      var activeInput = null;
+      var activePreview = null;
+
+      document.querySelectorAll('.liveroom-cover-btn').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var input = btn.parentElement.querySelector('.liveroom-cover-input');
+          if (input) input.click();
+        });
+      });
+
+      document.querySelectorAll('.liveroom-cover-input').forEach(function (input) {
+        input.addEventListener('change', function () {
+          var file = input.files && input.files[0];
+          if (!file) return;
+          activeInput = input;
+          activePreview = document.querySelector(input.dataset.preview);
+          var url = URL.createObjectURL(file);
+          var probe = new Image();
+          probe.onload = function () {
+            cropDialog.showModal();
+            var card = cropDialog.querySelector('.dialog-card');
+            var availW = card.clientWidth - 40;
+            var availH = Math.round(window.innerHeight * 0.6);
+            var w = probe.naturalWidth || 1, h = probe.naturalHeight || 1;
+            var scale = Math.min(1, availW / w, availH / h);
+            var src;
+            if (scale < 1) {
+              var c = document.createElement('canvas');
+              c.width = Math.round(w * scale);
+              c.height = Math.round(h * scale);
+              c.getContext('2d').drawImage(probe, 0, 0, c.width, c.height);
+              src = c.toDataURL('image/png');
+              URL.revokeObjectURL(url);
+            } else {
+              src = url;
+            }
+            cropImage.onload = function () {
+              if (cropper) cropper.destroy();
+              cropper = new Cropper(cropImage, {
+                aspectRatio: 16 / 9,
+                background: true,
+                autoCropArea: 0.8
+              });
+            };
+            cropImage.src = src;
+          };
+          probe.src = url;
+        });
+      });
+
+      cropApply.addEventListener('click', function () {
+        if (!cropper || !activeInput) return;
+        var canvas = cropper.getCroppedCanvas({ width: 1280, height: 720, imageSmoothingQuality: 'high' });
+        canvas.toBlob(function (blob) {
+          if (!blob) return;
+          var f = new File([blob], 'cover.jpg', { type: 'image/jpeg' });
+          var dt = new DataTransfer();
+          dt.items.add(f);
+          activeInput.files = dt.files;
+          if (activePreview) {
+            activePreview.src = URL.createObjectURL(blob);
+            activePreview.classList.remove('hidden');
+          }
+          cropDialog.close();
+        }, 'image/jpeg');
+      });
+
+      cropCancel.addEventListener('click', function () {
+        cropDialog.close();
+        if (activeInput) activeInput.value = '';
+      });
+    })();
+  </script>
 </body>
 </html>

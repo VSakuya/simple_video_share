@@ -42,6 +42,65 @@
       </form>
     </section>
   </div>
+
+  <section class="panel">
+    <h2>Live room</h2>
+    {% if me_room %}
+    <p class="muted">Your live room appears in the <a href="{{ url_for('live.index') }}">live list</a>. The stream link is the full address the player plays from (an internal <code>/live/&lt;code&gt;.flv</code> or any external URL).</p>
+    <form method="post" action="{{ url_for('live.manage_room') }}" enctype="multipart/form-data">
+      <div class="field">
+        <label for="lr-url">Stream link</label>
+        <input id="lr-url" name="url" value="{{ me_room['url'] }}" required>
+      </div>
+      <div class="field">
+        <label for="lr-title">Title</label>
+        <input id="lr-title" name="title" value="{{ me_room['title'] }}" required>
+      </div>
+      <div class="field">
+        <label for="lr-desc">Description</label>
+        <textarea id="lr-desc" name="description" rows="3" placeholder="What is this live room about?">{{ me_room['description'] }}</textarea>
+      </div>
+      <div class="field">
+        <label>Cover</label>
+        <div class="upload-cover">
+          <img id="lr-edit-cover-preview" class="upload-cover__img"
+               src="{{ url_for('home.cover', filename=me_room['cover_filename']) if me_room['cover_filename'] else url_for('static', filename='img/placeholder.svg') }}"
+               alt="cover">
+          <input class="liveroom-cover-input" type="file" name="cover" accept="image/*" hidden
+                 data-preview="#lr-edit-cover-preview">
+          <button type="button" class="upload-cover__btn liveroom-cover-btn">Choose &amp; crop cover</button>
+        </div>
+      </div>
+      <button type="submit" class="btn">Save changes</button>
+    </form>
+    {% else %}
+    <p class="muted">Create your live room. It will appear in the <a href="{{ url_for('live.index') }}">live list</a>. The stream link is the full address the player plays from (an internal <code>/live/&lt;code&gt;.flv</code> or any external URL).</p>
+    <form method="post" action="{{ url_for('live.manage_room') }}" enctype="multipart/form-data">
+      <div class="field">
+        <label for="lr-url">Stream link</label>
+        <input id="lr-url" name="url" placeholder="e.g. /live/sample.flv or https://host/live.flv" required>
+      </div>
+      <div class="field">
+        <label for="lr-title">Title</label>
+        <input id="lr-title" name="title" required>
+      </div>
+      <div class="field">
+        <label for="lr-desc">Description</label>
+        <textarea id="lr-desc" name="description" rows="3" placeholder="What is this live room about?"></textarea>
+      </div>
+      <div class="field">
+        <label>Cover</label>
+        <div class="upload-cover">
+          <img id="lr-add-cover-preview" class="upload-cover__img hidden" alt="cover preview">
+          <input class="liveroom-cover-input" type="file" name="cover" accept="image/*" hidden
+                 data-preview="#lr-add-cover-preview">
+          <button type="button" class="upload-cover__btn liveroom-cover-btn">Choose &amp; crop cover</button>
+        </div>
+      </div>
+      <button type="submit" class="btn">Create live room</button>
+    </form>
+    {% endif %}
+  </section>
 </div>
 
 <!-- Avatar crop dialog (Cropper.js, §13.15). -->

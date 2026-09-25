@@ -61,6 +61,28 @@ def index() -> Any:
     )
 
 
+@upload_bp.route("/edit")
+@login_required
+def edit() -> Any:
+    """Clip/edit sub-page: a single video with preview + trim, then transcode.
+
+    The main /upload page is the multi-file queue (auto-transcode, no clip).
+    This page keeps the single-file clip flow and reuses the same shared
+    pipeline (pipeline.js via edit.js).
+    """
+    from ..auth import current_user
+    me = current_user()
+    folders = db.folders_with_depth(me["id"]) if me else []
+    settings = db.get_all_settings()
+    try:
+        max_bitrate_kbps = int(settings.get("default_bitrate", "5000"))
+    except (TypeError, ValueError):
+        max_bitrate_kbps = 5000
+    return render_template(
+        "edit.html", folders=folders, max_bitrate_kbps=max_bitrate_kbps
+    )
+
+
 @upload_bp.route("/log", methods=["POST"])
 @login_required
 def client_log() -> Any:

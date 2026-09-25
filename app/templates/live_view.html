@@ -13,6 +13,15 @@
   <span class="breadcrumb__current">{{ room['title'] }}</span>
 </nav>
 <h1 class="watch-title">{{ room['title'] }}</h1>
+<div class="live-view__author">
+  <img class="live-view__avatar"
+       src="{{ url_for('home.avatar_file', filename=room['owner_avatar']) if room['owner_avatar'] else url_for('static', filename='img/avatar-default.svg') }}"
+       alt="{{ room['owner_username'] or 'Unknown' }}">
+  <span class="live-view__name">{{ room['owner_username'] or 'Unknown' }}</span>
+</div>
+{% if room['description'] %}
+<p class="live-view__description">{{ room['description'] }}</p>
+{% endif %}
 <div class="player-wrap" id="player-wrap">
   <div id="dplayer"></div>
 </div>

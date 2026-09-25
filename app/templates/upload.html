@@ -2,11 +2,16 @@
 {% block title %}Upload — Simple Video Share{% endblock %}
 {% block content %}
 <div class="upload-page">
-  <h1>Upload video</h1>
+  <h1>Upload videos</h1>
+  <p class="muted">
+    Select one or more videos. Each is probed, auto-transcoded (1080p / admin bitrate)
+    and uploaded in order — no clipping on this page.
+  </p>
+  <a class="upload-cta" href="{{ url_for('upload.edit') }}">Use the clip editor</a>
 
-  <!-- Drag & drop zone -->
+  <!-- Multi-file drop zone -->
   <div id="drop-zone" class="upload-dropzone">
-    <input type="file" id="file-input" accept="video/*" hidden>
+    <input type="file" id="file-input" accept="video/*" multiple hidden>
     <div class="upload-dropzone__icon">
       <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
         <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/>
@@ -16,19 +21,12 @@
     <p class="upload-dropzone__hint">or</p>
     <button type="button" class="upload-dropzone__btn">Select files</button>
     <div id="file-label" class="upload-dropzone__filename"></div>
-    <div id="video-meta" class="upload-dropzone__meta"></div>
   </div>
 
-  <!-- Title -->
+  <!-- Queue -->
   <div class="upload-section">
-    <label for="title-input" class="upload-label">Title</label>
-    <input type="text" id="title-input" class="upload-input" placeholder="Add a title" required>
-  </div>
-
-  <!-- Description -->
-  <div class="upload-section">
-    <label for="description-input" class="upload-label">Description <span class="muted">(optional)</span></label>
-    <textarea id="description-input" class="upload-input" placeholder="Add a description" rows="3"></textarea>
+    <label class="upload-label">Queue <span id="queue-count" class="muted"></span></label>
+    <div id="queue-list" class="upload-queue"></div>
   </div>
 
   <!-- Max FPS cap for the transcode (never exceeds the admin Max FPS = 60) -->
@@ -37,51 +35,27 @@
     <input type="number" id="max-fps-input" class="upload-input upload-input--narrow" min="1" max="60" step="1" value="60">
   </div>
 
-  <!-- Cover -->
-  <div id="cover-panel" class="upload-section">
-    <label for="cover-input" class="upload-label">Cover <span class="muted">(optional — auto from 60s frame)</span></label>
-    <div class="upload-cover">
-      <input type="file" id="cover-input" accept="image/*" hidden>
-      <img id="cover-preview" class="hidden upload-cover__img" alt="cover preview">
-      <button type="button" class="upload-cover__btn" onclick="document.getElementById('cover-input').click()">
-        Choose &amp; crop cover
-      </button>
-    </div>
+  <!-- Folder: choose an existing one, or create a new one (applies to the whole queue) -->
+  <div class="upload-section">
+    <label for="folder-select" class="upload-label">Folder <span class="muted">(optional)</span></label>
+    <select id="folder-select" class="upload-input">
+      <option value="">Root</option>
+      {% for f in folders %}
+      {% set indent = '&nbsp;' * 4 * f['depth'] %}
+      <option value="{{ f['id'] }}">{{ indent | safe }}{{ f['name'] }}</option>
+      {% endfor %}
+      <option value="__new__">New folder…</option>
+    </select>
+    <input type="text" id="folder-new-name" class="upload-input hidden" placeholder="New folder name">
+    <input type="hidden" id="folder-input" value="">
   </div>
 
-  <!-- Preview + clip (shown after file selected) -->
-  <div id="clip-panel" class="upload-section hidden">
-    <label class="upload-label">Preview &amp; clip</label>
-    <div class="upload-timeline" id="clip-timeline">
-      <video id="preview-video" class="upload-timeline__video" controls playsinline></video>
-      <button type="button" class="clip-fullscreen-btn" id="clip-fs-btn"
-              data-inpage-expand="#clip-timeline" title="In-page fullscreen">
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
-        </svg>
-      </button>
-      <div class="upload-clip-controls">
-        <div class="upload-clip-controls__group">
-          <button type="button" id="set-start-btn" class="upload-clip-controls__btn">Set Start</button>
-          <input type="text" id="clip-start-input" class="upload-clip-controls__time" value="0:00" autocomplete="off" spellcheck="false" aria-label="Clip start time (minutes:seconds)">
-        </div>
-        <div class="upload-clip-controls__group">
-          <button type="button" id="set-end-btn" class="upload-clip-controls__btn">Set End</button>
-          <input type="text" id="clip-end-input" class="upload-clip-controls__time" value="0:00" autocomplete="off" spellcheck="false" aria-label="Clip end time (minutes:seconds)">
-        </div>
-      </div>
-    </div>
-    <input type="hidden" id="clip-start" value="00:00">
-    <input type="hidden" id="clip-end" value="00:00">
-  </div>
-
-  <!-- Progress -->
+  <!-- Progress for the file currently being processed -->
   <div id="progress-panel" class="upload-section hidden">
     <label class="upload-label">Progress</label>
     <div class="bar upload-progress-bar"><div class="bar__fill" id="progress-fill"></div></div>
     <p id="progress-status" class="upload-progress-status">Idle</p>
     <div id="progress-speed" class="upload-progress-speed hidden"></div>
-    <div id="transcode-warning" class="upload-warning hidden"></div>
   </div>
 
   <!-- Client pipeline log (also mirrored to the server as storage/logs/client.log) -->
@@ -93,36 +67,15 @@
     <div id="log-console" class="upload-log"></div>
   </div>
 
-  <!-- Folder: choose an existing one, or create a new one (JS resolves it) -->
-  <div class="upload-section">
-    <label for="folder-select" class="upload-label">Folder <span class="muted">(optional)</span></label>
-    <select id="folder-select" class="upload-input">
-      <option value="">Root</option>
-      {% for f in folders %}
-      {% set indent = '&nbsp;' * 4 * f['depth'] %}
-      <option value="{{ f['id'] }}">{{ indent | safe }}{{ f['name'] }}</option>
-      {% endfor %}
-      <option value="__new__">New folder…</option>
-    </select>
-    <input type="text" id="folder-new-name" class="upload-input hidden"
-           placeholder="New folder name">
-    <input type="hidden" name="folder_id" id="folder-input" value="">
-  </div>
-
-  <!-- Submit -->
-  <form id="upload-form" method="post" enctype="multipart/form-data"
-        action="{{ url_for('upload.submit') }}">
-    <button type="submit" id="upload-button" class="upload-submit">Upload</button>
-  </form>
+  <!-- Start -->
+  <button type="button" id="start-button" class="upload-submit">Upload queue</button>
 
   <p class="upload-footer muted">
-    Clipping, transcoding (1080p / AV1) and cover extraction all happen in your browser before upload.
+    Transcoding (1080p / admin bitrate) happens in your browser before upload.
   </p>
 </div>
 
-<!-- Success screen (§13.18): shown after the server has the file, while the
-     background worker pushes it to Google Drive. Auto-navigates to My Videos
-     after 3 s, or immediately via the button. -->
+<!-- Success screen: shown after the server has every file in the queue. -->
 <div id="success-overlay" class="upload-success hidden">
   <div class="upload-success__card">
     <div class="upload-success__icon">
@@ -131,9 +84,9 @@
         <path d="M8 12l3 3 5-6"/>
       </svg>
     </div>
-    <h2 class="upload-success__title">Upload successful</h2>
+    <h2 class="upload-success__title">Upload complete</h2>
     <p class="upload-success__text">
-      Your video is saved — it is now being uploaded to Google Drive in the background.
+      Your videos are saved — they are now being uploaded to Google Drive in the background.
     </p>
     <p class="upload-success__count">
       Redirecting to My Videos in <span id="success-countdown">3</span>…
@@ -141,20 +94,6 @@
     <button type="button" id="success-go" class="upload-success__btn">Go to My Videos</button>
   </div>
 </div>
-
-<!-- Cover crop dialog (Cropper.js, §13.21). -->
-<link rel="stylesheet" href="{{ url_for('static', filename='vendor/cropper.min.css') }}">
-<dialog id="cover-crop-dialog" class="crop-dialog">
-  <article class="dialog-card">
-    <h2>Crop cover</h2>
-    <img id="cover-crop-image" alt="cover crop">
-    <div class="dialog-actions">
-      <button type="button" class="btn" id="cover-crop-apply">Crop</button>
-      <button type="button" class="btn btn--ghost" id="cover-crop-cancel">Cancel</button>
-    </div>
-  </article>
-</dialog>
-<script src="{{ url_for('static', filename='vendor/cropper.min.js') }}"></script>
 
 <script>window.SVS_MAX_BITRATE_KBPS = {{ max_bitrate_kbps }};</script>
 <script type="module" src="{{ url_for('static', filename='js/upload.js') }}"></script>

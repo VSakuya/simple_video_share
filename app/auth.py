@@ -211,7 +211,7 @@ def account() -> Any:
         if changed:
             flash("Account updated.", "success")
         return redirect(url_for("auth.account"))
-    return _render("account.html")
+    return _render("account.html", me_room=db.get_live_room_by_owner(me["id"]))
 
 
 @auth_bp.route("/avatar", methods=["POST"])

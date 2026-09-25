@@ -16,12 +16,13 @@ HTML. There is no client-side polling.
 
 import concurrent.futures
 import logging
-from typing import Any
+from pathlib import Path
+from typing import Any, Optional
 
-from flask import Blueprint, abort, render_template, request
+from flask import Blueprint, abort, current_app, flash, redirect, render_template, request, url_for
 
-from .. import db
-from ..auth import login_required
+from .. import db, storage
+from ..auth import current_user, login_required
 from ..live_probe import probe_stream
 
 live_bp = Blueprint("live", __name__, url_prefix="/live")
@@ -39,6 +40,26 @@ def _probe(url: str, base: str) -> bool:
     if url.startswith("/"):
         url = base + url.lstrip("/")
     return probe_stream(url, _STREAM_USER, _STREAM_PASSWORD)
+
+
+#: A live-room stream link must be a full URL (``http(s)://...``) or a path on
+#: the same host (``/live/<code>.flv``). Anything else is rejected (§14.8).
+def _valid_live_url(url: str) -> bool:
+    if not url:
+        return False
+    if url.startswith("/"):
+        return True
+    return url.startswith("http://") or url.startswith("https://")
+
+
+def _delete_cover_file(filename: str) -> None:
+    """Remove a cover file from disk (best effort)."""
+    path = Path(current_app.config["COVERS_DIR"]) / filename
+    if path.exists():
+        try:
+            path.unlink()
+        except OSError:
+            logger.warning("live: could not delete cover file %s", filename)
 
 
 @live_bp.route("/")
@@ -68,3 +89,48 @@ def view(room_id: int) -> Any:
     if room is None:
         abort(404)
     return render_template("live_view.html", room=room)
+
+
+@live_bp.route("/room", methods=["POST"])
+@login_required
+def manage_room() -> Any:
+    """Self-service: a user creates/updates their own live room (§14.8).
+
+    One room per user: the first submission creates it, later ones update it.
+    """
+    me = current_user()
+    assert me is not None
+    url = (request.form.get("url") or "").strip()
+    title = (request.form.get("title") or "").strip()
+    description = (request.form.get("description") or "").strip()
+    if not _valid_live_url(url):
+        flash("Stream link must be a full URL or a path starting with /.", "error")
+        return redirect(url_for("auth.account"))
+    if not title:
+        flash("Room title is required.", "error")
+        return redirect(url_for("auth.account"))
+    # Cover (optional): a cropped 16:9 image stored under the shared covers dir.
+    cover = request.files.get("cover")
+    new_cover: Optional[str] = None
+    if cover is not None and cover.filename:
+        new_cover = storage.save_cover(
+            cover, Path(current_app.config["COVERS_DIR"]), current_app.config
+        )
+    room = db.get_live_room_by_owner(me["id"])
+    if room is None:
+        db.create_live_room(
+            url, title, owner_id=me["id"], description=description, cover_filename=new_cover
+        )
+        flash("Live room created.", "success")
+    else:
+        if new_cover and room.get("cover_filename"):
+            _delete_cover_file(room["cover_filename"])
+        db.update_live_room(
+            room["id"],
+            url=url,
+            title=title,
+            description=description,
+            cover_filename=new_cover,
+        )
+        flash("Live room updated.", "success")
+    return redirect(url_for("auth.account"))

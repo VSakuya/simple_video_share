@@ -1,1 +1,1 @@
-INSERT INTO live_rooms (url, title, cover_filename) VALUES (?, ?, ?)
+INSERT INTO live_rooms (url, title, description, owner_id, cover_filename) VALUES (?, ?, ?, ?, ?)

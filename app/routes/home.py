@@ -43,13 +43,19 @@ def folder(folder_id: int) -> Any:
 
 
 def _render_gallery(**kwargs: Any) -> Any:
-    base_dir = os.path.dirname(str(current_app.config["VIDEOS_DIR"]))
-    local_free = storage.free_space_bytes(base_dir)
+    # The home page reports *cache* remaining space (from the admin-configured
+    # Max cache cap), not raw disk free space. Real disk free space is an
+    # admin concern and is shown on the admin page only.
+    cap = storage.max_cache_bytes(current_app.config)
+    cached = db.sum_cached_bytes()
+    remaining = max(0, cap - cached) if cap > 0 else 0
     quota = drive.get_drive_quota()
     drive_free = quota[2] if quota is not None else None
     return render_template(
         "home.html",
-        local_free_bytes=local_free,
+        cached_bytes=cached,
+        cache_cap_bytes=cap,
+        cache_remaining_bytes=remaining,
         drive_free_bytes=drive_free,
         **kwargs,
     )
