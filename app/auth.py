@@ -7,6 +7,7 @@ Also exposes helpers used across other blueprints:
 """
 
 import time
+from datetime import datetime
 from functools import wraps
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -116,8 +117,12 @@ def login() -> Any:
             flash("Invalid username or password.", "error")
             return redirect(url_for("auth.login", next=next_url))
 
-        # 3. Success — clear failures, then apply the forced-change redirect.
+        # 3. Success — clear failures, record last login, then apply the forced-change redirect.
         db.clear_failed_logins(username)
+        db.update_user(
+            user["id"],
+            last_login_at=datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+        )
         session["user_id"] = user["id"]
         session.permanent = True
         flash(f"Logged in as {user['username']}.", "success")

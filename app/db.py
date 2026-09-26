@@ -62,6 +62,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute(_sql("migrations", "users_add_avatar"))
     if "must_change_password" not in cols:
         conn.execute(_sql("migrations", "users_add_must_change"))
+    if "last_login_at" not in cols:
+        conn.execute(_sql("migrations", "users_add_last_login_at"))
 
     video_cols = {row[1] for row in conn.execute("PRAGMA table_info(videos)").fetchall()}
     if "drive_filename" not in video_cols:

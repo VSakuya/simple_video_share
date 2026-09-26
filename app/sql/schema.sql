@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS users (
     is_admin             INTEGER NOT NULL DEFAULT 0,
     avatar_filename      TEXT,
     must_change_password INTEGER NOT NULL DEFAULT 0,
+    last_login_at        TEXT,
     created_at           TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 

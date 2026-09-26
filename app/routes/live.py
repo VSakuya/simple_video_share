@@ -162,7 +162,8 @@ def chat(room_id: int) -> Any:
     """Post one ephemeral chat message to the room (§16.8).
 
     JSON ``{"text": "..."}``; the message is broadcast to every open presence
-    connection in the room and stored nowhere.
+    connection in the room and kept in the room's in-memory ring buffer (capped
+    at 50, L62) so a client that enters later can load the recent history.
     """
     room = db.get_live_room(room_id)
     if room is None:

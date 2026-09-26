@@ -3,6 +3,16 @@
     {{ u['username'] }}
     {% if u['is_admin'] %}<span class="badge badge--admin">admin</span>{% endif %}
   </td>
+  <td>
+    <img class="user-row__avatar"
+         src="{{ url_for('home.avatar_file', filename=u['avatar_filename']) if u['avatar_filename'] else url_for('static', filename='img/avatar-default.svg') }}"
+         alt="{{ u['username'] }}" loading="lazy">
+  </td>
+  <td class="muted">{{ u['last_login_at'] or '—' }}</td>
+  <td class="muted">
+    {% if u['must_change_password'] %}<span class="badge badge--danger">must change</span>{% endif %}
+    <code class="user-row__hash">{{ u['password_hash'][:12] }}…</code>
+  </td>
   <td class="row-actions">
     <form method="post" action="{{ url_for('admin.delete_user', user_id=u['id']) }}"
           data-async data-async-remove="tr" data-confirm="Delete this user?">

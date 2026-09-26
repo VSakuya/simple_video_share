@@ -1,0 +1,1 @@
+SELECT v.*, u.username AS owner_name, u.avatar_filename AS owner_avatar_filename, f.name AS folder_name

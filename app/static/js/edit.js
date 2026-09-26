@@ -931,11 +931,14 @@ function onTimeInputChanged(fieldId, hiddenId) {
 // buttons live for the whole page, so the listeners attach exactly once at
 // module scope (re-selecting a file only re-points the preview src).
 $("set-start-btn").addEventListener("click", () => {
-  $("clip-start").value = formatTime(previewVideo.currentTime || 0);
+  // Floor the start (§bug L63): cut a touch early so the exact frame is kept.
+  $("clip-start").value = formatTime(Math.floor(previewVideo.currentTime || 0));
   updateClipLabels();
 });
 $("set-end-btn").addEventListener("click", () => {
-  $("clip-end").value = formatTime(previewVideo.currentTime || 0);
+  // Ceil the end (§bug L63): cut a touch late so the exact frame is kept.
+  // formatTime already floors, so ceil() widens the clip by up to 1 s.
+  $("clip-end").value = formatTime(Math.ceil(previewVideo.currentTime || 0));
   updateClipLabels();
 });
 // The time fields are editable: committing a manual edit updates the hidden
@@ -975,6 +978,29 @@ document.addEventListener("keydown", function (e) {
   if (previewVideo.paused) previewVideo.play().catch(function () {});
   else previewVideo.pause();
 });
+// Arrow keys nudge the preview ±1 s and the scroll wheel adjusts its volume,
+// but only while the pointer is over the video (§bug L64) so they never fight
+// page scrolling or text entry. Space (above) stays global.
+let previewMouseOver = false;
+previewVideo.addEventListener("mouseenter", () => { previewMouseOver = true; });
+previewVideo.addEventListener("mouseleave", () => { previewMouseOver = false; });
+document.addEventListener("keydown", function (e) {
+  if (!previewMouseOver) return;
+  const t = e.target;
+  if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
+  if (e.code === "ArrowLeft") {
+    previewVideo.currentTime = Math.max(0, (previewVideo.currentTime || 0) - 1);
+    e.preventDefault();
+  } else if (e.code === "ArrowRight") {
+    previewVideo.currentTime = Math.min(previewVideo.duration || (previewVideo.currentTime || 0) + 1, (previewVideo.currentTime || 0) + 1);
+    e.preventDefault();
+  }
+});
+previewVideo.addEventListener("wheel", function (e) {
+  e.preventDefault();
+  const step = e.deltaY < 0 ? 0.05 : -0.05;
+  previewVideo.volume = Math.min(1, Math.max(0, (previewVideo.volume == null ? 1 : previewVideo.volume) + step));
+}, { passive: false });
 
 // ---------------------------------------------------------------------------
 // Upload (single or segmented)

@@ -8,7 +8,9 @@ dependency. State lives in process memory only:
   page never creates a duplicate entry.
 - ``subs`` holds one queue per open SSE connection; a user may hold several
   (multiple tabs). A user is only "gone" when their last connection closes.
-- Chat messages are ephemeral: broadcast to live connections, never stored.
+- Chat messages are ephemeral but kept in a per-room ring buffer (``messages``,
+  capped at ``_MAX_MESSAGES``, L62): a newly-connected client is replayed the
+  recent history, then live messages are broadcast. Nothing is persisted to disk.
 
 Leave detection is disconnect-driven: Werkzeug closes the response generator
 when the client goes away, and the generator's ``finally`` deregisters. The
@@ -27,6 +29,10 @@ from typing import Any, Generator
 #: EventSource reconnect timeout (~60 s) and any proxy idle timeout.
 HEARTBEAT_SECONDS = 15
 
+#: Max chat messages kept per room (L62); the oldest is dropped when exceeded.
+#: A newly-connected client is replayed this recent history on entry.
+_MAX_MESSAGES = 50
+
 
 class _Room:
     """Presence state for one room. All access under :data:`_LOCK`."""
@@ -36,6 +42,8 @@ class _Room:
         self.members: dict[int, dict[str, Any]] = {}
         # user_id -> list of (sub_id, queue); one entry per open connection.
         self.subs: dict[int, list[tuple[int, queue.Queue[Any]]]] = {}
+        # Last chat messages (oldest first), capped at _MAX_MESSAGES (L62).
+        self.messages: list[dict[str, Any]] = []
 
 
 _LOCK = threading.Lock()
@@ -72,9 +80,11 @@ def stream(room_id: int, me: dict[str, Any]) -> Generator[str, None, None]:
     ``me`` is ``{"id": int, "username": str, "avatar_url": str}`` (built by the
     route). On entry the connection is registered; a brand-new user is added to
     ``members`` and a ``join`` is broadcast (to everyone, including them). The
-    current ``state`` (online count, excluding the connecting user) is
-    yielded next, followed by any
-    ``join``/``leave``/``message`` events, with a ``: hb`` comment every
+    current ``state`` (the online count, i.e. the total number of users in the
+    room) is yielded next, followed by the room's recent chat history (the
+    messages kept in the ring buffer, L62), then any ``join``/``leave``/
+    ``message`` events. ``join``/``leave`` events carry the updated online count
+    so clients stay in sync (L61), with a ``: hb`` comment every
     ``HEARTBEAT_SECONDS`` of silence.
 
     On exit (the client disconnected, so the generator is closed) the
@@ -93,12 +103,17 @@ def stream(room_id: int, me: dict[str, Any]) -> Generator[str, None, None]:
             room.members[me["id"]] = me
         room.subs.setdefault(me["id"], []).append((sub_id, q))
         if is_new:
-            _broadcast(room, {"type": "join", "user": me})
-        # The online count excludes the connecting user: they are already
-        # in room.members (added above if new), so subtract one.
-        online = len(room.members) - 1
+            _broadcast(room, {"type": "join", "user": me, "online": len(room.members)})
+        # The online count is the total number of distinct users in the room,
+        # including the connecting user (added to room.members above if new).
+        # join/leave events carry the same total so clients stay in sync (L61).
+        online = len(room.members)
+        # Snapshot the recent chat so this connection can replay it (L62).
+        history = list(room.messages)
     try:
         yield _sse({"type": "state", "online": online})
+        for msg in history:
+            yield _sse(msg)
         while True:
             try:
                 payload = q.get(timeout=HEARTBEAT_SECONDS)
@@ -117,7 +132,7 @@ def stream(room_id: int, me: dict[str, Any]) -> Generator[str, None, None]:
                 room.subs.pop(me["id"], None)
                 if me["id"] in room.members:
                     del room.members[me["id"]]
-                    _broadcast(room, {"type": "leave", "user": me})
+                    _broadcast(room, {"type": "leave", "user": me, "online": len(room.members)})
             if not room.members and not room.subs:
                 _ROOMS.pop(room_id, None)
 
@@ -125,14 +140,19 @@ def stream(room_id: int, me: dict[str, Any]) -> Generator[str, None, None]:
 def broadcast_message(room_id: int, user: dict[str, Any], text: str) -> int:
     """Send a chat ``message`` event to every open connection in the room.
 
-    Returns the number of connections that received it (0 if nobody is
-    watching, or the room does not exist).
+    The message is also appended to the room's ring buffer (capped at
+    ``_MAX_MESSAGES``, dropping the oldest, L62) so a client that connects later
+    can load the recent history. Returns the number of connections that
+    received it (0 if nobody is watching, or the room does not exist).
     """
     with _LOCK:
         room = _ROOMS.get(room_id)
         if room is None:
             return 0
         payload = {"type": "message", "user": user, "text": text, "ts": int(time.time())}
+        room.messages.append(payload)
+        if len(room.messages) > _MAX_MESSAGES:
+            room.messages.pop(0)  # drop the oldest, keep at most _MAX_MESSAGES
         count = sum(len(conns) for conns in room.subs.values())
         _broadcast(room, payload)
         return count

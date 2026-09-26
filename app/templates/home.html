@@ -5,7 +5,6 @@
 <nav class="breadcrumb" aria-label="Breadcrumb">
   <a href="{{ url_for('home.index') }}">Root</a>
   {% for crumb in breadcrumbs %}
-  <span class="breadcrumb__sep">/</span>
   {% if loop.last %}
   <span class="breadcrumb__current">{{ crumb['name'] }}</span>
   {% else %}

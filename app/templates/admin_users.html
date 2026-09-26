@@ -29,13 +29,19 @@
     <div class="table-wrap">
       <table class="table">
         <thead>
-          <tr><th>Username</th><th class="row-actions">Actions</th></tr>
+          <tr>
+            <th>User</th>
+            <th>Avatar</th>
+            <th>Last login</th>
+            <th>Password</th>
+            <th class="row-actions">Actions</th>
+          </tr>
         </thead>
         <tbody id="users-tbody">
           {% for u in users %}
           {% include "_user_row.html" %}
           {% else %}
-          <tr><td colspan="2" class="muted">No users.</td></tr>
+          <tr><td colspan="5" class="muted">No users.</td></tr>
           {% endfor %}
         </tbody>
       </table>

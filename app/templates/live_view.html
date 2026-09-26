@@ -10,7 +10,6 @@
 {% block content %}
 <nav class="breadcrumb" aria-label="Breadcrumb">
   <a href="{{ url_for('live.index') }}">Live</a>
-  <span class="breadcrumb__sep">/</span>
   <span class="breadcrumb__current">{{ room['title'] }}</span>
 </nav>
 <!-- Live room page (§16.8): big player on the left, fixed-width panel on the
@@ -128,13 +127,17 @@
   var onlineEl = document.getElementById('live-online');
   var form = document.getElementById('live-composer');
   var input = document.getElementById('live-input');
-  var MAX_ROWS = 200;
+  var MAX_MESSAGES = 50;
 
   function trim() {
     var empty = feed.querySelector('.live-feed__empty');
     if (empty) empty.remove();
-    while (feed.children.length > MAX_ROWS) {
-      feed.removeChild(feed.firstElementChild);
+    // Cap the chat records at MAX_MESSAGES (L62); join/leave notices are not
+    // chat records and are not counted. The oldest message is removed first.
+    var msgs = feed.querySelectorAll('.live-feed__msg');
+    while (msgs.length > MAX_MESSAGES) {
+      feed.removeChild(msgs[0]);
+      msgs = feed.querySelectorAll('.live-feed__msg');
     }
   }
 
@@ -181,8 +184,10 @@
     if (data.type === 'state') {
       onlineEl.textContent = String(data.online);
     } else if (data.type === 'join') {
+      onlineEl.textContent = String(data.online);
       notice(data.user.username + ' joined the room');
     } else if (data.type === 'leave') {
+      onlineEl.textContent = String(data.online);
       notice(data.user.username + ' left the room');
     } else if (data.type === 'message') {
       message(data.user, data.text);

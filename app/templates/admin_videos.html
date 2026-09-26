@@ -10,18 +10,32 @@
       <table class="table">
         <thead>
           <tr>
-            <th>Title</th><th>Owner</th><th>Status</th><th>Cached</th>
-            <th>Pinned</th><th class="row-actions">Actions</th>
+            <th>Cover</th><th>Title</th><th>Owner</th><th>Uploaded</th>
+            <th>Status</th><th>Cached</th><th>Pinned</th><th class="row-actions">Actions</th>
           </tr>
         </thead>
         <tbody>
           {% for video in videos %}
           <tr class="admin-video-row">
+            <td class="vt-cover">
+              <img class="row-cover"
+                   src="{{ url_for('home.cover_file', filename=video['cover_filename']) if video['cover_filename'] else url_for('static', filename='img/video-default.svg') }}"
+                   alt="{{ video['title'] }} thumbnail"
+                   loading="lazy" onerror="this.onerror=null;this.src='{{ url_for('static', filename='img/video-default.svg') }}'" onload="this.classList.add('is-loaded')">
+            </td>
             <td>
               <a href="{{ url_for('watch.page', video_id=video['id']) }}">{{ video['title'] }}</a>
               {% if video['folder_name'] %}<span class="muted"> · {{ video['folder_name'] }}</span>{% endif %}
             </td>
-            <td>{{ video['owner_name'] }}</td>
+            <td>
+              <span class="admin-owner">
+                <img class="admin-owner__avatar"
+                     src="{{ url_for('home.avatar_file', filename=video['owner_avatar_filename']) if video['owner_avatar_filename'] else url_for('static', filename='img/avatar-default.svg') }}"
+                     alt="{{ video['owner_name'] }}" loading="lazy">
+                {{ video['owner_name'] }}
+              </span>
+            </td>
+            <td class="vt-uploaded muted" data-ts="{{ video['uploaded_at'] if video['uploaded_at'] else '' }}"></td>
             <td>{{ video['status'] }}</td>
             <td>{{ 'yes' if video['local_filename'] else 'no' }}</td>
             <td>
@@ -43,12 +57,28 @@
             </td>
           </tr>
           {% else %}
-          <tr><td colspan="6" class="muted">No videos.</td></tr>
+          <tr><td colspan="8" class="muted">No videos.</td></tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
   </section>
+  <script>
+    // Admin videos upload-time column (§16.13c): convert data-ts (UTC) to the
+    // viewer's local timezone (24-hour clock), same as My Videos.
+    (function () {
+      function pad(n) { return String(n).padStart(2, "0"); }
+      document.querySelectorAll(".vt-uploaded[data-ts]").forEach(function (el) {
+        var raw = el.getAttribute("data-ts");
+        if (!raw) return;
+        var d = new Date(raw.replace(" ", "T") + "Z");
+        if (isNaN(d.getTime())) { el.textContent = raw.slice(0, 16); return; }
+        el.textContent =
+          d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) +
+          " " + pad(d.getHours()) + ":" + pad(d.getMinutes());
+      });
+    })();
+  </script>
   <script>
     // Pin/unpin toggle (§16.6): async.js dispatches here after the fetch.
     window.svsAsyncActions = window.svsAsyncActions || {};

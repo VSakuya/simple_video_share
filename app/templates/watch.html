@@ -53,25 +53,6 @@
   var homeUrl = {{ url_for('home.index') | tojson }};
   var poll = null;
 
-  // Spacebar toggles play/pause on the player (instead of scrolling the page),
-  // mirroring the upload page. DPlayer's own hotkey is disabled (hotkey: false)
-  // so this is the single, focus-independent handler. Ignored while the user is
-  // typing in a comment field (input / textarea / contenteditable).
-  document.addEventListener('keydown', function (e) {
-    if (e.code !== 'Space') return;
-    var ae = document.activeElement;
-    if (ae) {
-      var tag = ae.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || ae.isContentEditable) return;
-    }
-    e.preventDefault();
-    var v = document.querySelector('#dplayer video');
-    if (!v) return;
-    if (document.activeElement === v) v.blur();
-    if (v.paused) v.play().catch(function () {});
-    else v.pause();
-  });
-
   function showProgress() {
     if (confirmBox) confirmBox.classList.add('hidden');
     if (progressBox) progressBox.classList.remove('hidden');
@@ -184,6 +165,61 @@
   if ({{ is_cached | tojson }}) {
     window.initWatchPlayer();
   }
+})();
+</script>
+
+<script>
+// Player keyboard controls (§bug L64). Always included (cached and uncached):
+// Space toggles play/pause; arrow keys nudge ±1 s and the wheel adjusts volume,
+// the latter two only while the pointer is over the player (hover is detected
+// on #dplayer because DPlayer builds the <video> element lazily). Ignored while
+// typing in a comment field (input / textarea / contenteditable).
+(function () {
+  'use strict';
+  document.addEventListener('keydown', function (e) {
+    if (e.code !== 'Space') return;
+    var ae = document.activeElement;
+    if (ae) {
+      var tag = ae.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || ae.isContentEditable) return;
+    }
+    e.preventDefault();
+    var v = document.querySelector('#dplayer video');
+    if (!v) return;
+    if (document.activeElement === v) v.blur();
+    if (v.paused) v.play().catch(function () {});
+    else v.pause();
+  });
+  var playerEl = document.getElementById('dplayer');
+  var watchMouseOver = false;
+  if (playerEl) {
+    playerEl.addEventListener('mouseenter', function () { watchMouseOver = true; });
+    playerEl.addEventListener('mouseleave', function () { watchMouseOver = false; });
+    playerEl.addEventListener('wheel', function (e) {
+      e.preventDefault();
+      var vv = playerEl.querySelector('video');
+      if (!vv) return;
+      var step = e.deltaY < 0 ? 0.05 : -0.05;
+      vv.volume = Math.min(1, Math.max(0, (vv.volume == null ? 1 : vv.volume) + step));
+    }, { passive: false });
+  }
+  document.addEventListener('keydown', function (e) {
+    if (!watchMouseOver) return;
+    var ae = document.activeElement;
+    if (ae) {
+      var tag = ae.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || ae.isContentEditable) return;
+    }
+    var vv = document.querySelector('#dplayer video');
+    if (!vv) return;
+    if (e.code === 'ArrowLeft') {
+      vv.currentTime = Math.max(0, (vv.currentTime || 0) - 1);
+      e.preventDefault();
+    } else if (e.code === 'ArrowRight') {
+      vv.currentTime = Math.min(vv.duration || (vv.currentTime || 0) + 1, (vv.currentTime || 0) + 1);
+      e.preventDefault();
+    }
+  });
 })();
 </script>
 

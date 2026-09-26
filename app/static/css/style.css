@@ -245,14 +245,21 @@ button:hover { filter: brightness(1.1); }
 .flash--error { background: var(--flash-error-bg); color: var(--flash-error-fg); }
 .flash--info { background: var(--flash-info-bg); color: var(--flash-info-fg); }
 
-/* Waterfall (masonry) */
+/* Waterfall (masonry): a CSS grid so cards fill left-to-right, top-to-bottom
+   (row-major). CSS multi-column (the previous `column-count`) filled
+   top-to-bottom then left-to-right (column-major), which is not the reading
+   order users expect and also scrambled the server-side pinned-first order.
+   Cards are uniform height (16:9 cover + 1-line title + 1-line meta), so a grid
+   is visually equivalent to masonry while preserving DOM order. */
 .waterfall {
-  column-count: 4; column-gap: 12px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
 }
-@media (max-width: 900px) { .waterfall { column-count: 3; } }
-@media (max-width: 600px) { .waterfall { column-count: 2; } }
+@media (max-width: 900px) { .waterfall { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 600px) { .waterfall { grid-template-columns: repeat(2, 1fr); } }
 .card {
-  display: block; margin-bottom: 12px; break-inside: avoid;
+  display: block;
   background: var(--panel); border-radius: 8px; overflow: hidden;
   text-decoration: none; color: var(--text);
   position: relative;
@@ -978,6 +985,10 @@ button:disabled { opacity: 0.55; cursor: not-allowed; filter: none; }
 .badge--admin { background: #33264d; color: #c9b3ff; }
 .badge--danger { background: #4d2330; color: #ff9db0; }
 
+/* Admin user list: small circular avatar + a truncated password-hash preview. */
+.user-row__avatar { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; display: block; }
+.user-row__hash { font-size: 0.72rem; }
+
 /* My-videos status column: a compact progress bar while a Drive upload runs. */
 .status-cell { min-width: 168px; }
 .video-progress { display: flex; align-items: center; gap: 8px; }
@@ -1033,6 +1044,13 @@ button:disabled { opacity: 0.55; cursor: not-allowed; filter: none; }
 .row-cover.is-loaded { opacity: 1; }
 .vt-uploaded { white-space: nowrap; }
 .vt-size { white-space: nowrap; }
+/* Admin videos table (§16.13c): owner shown as a small avatar + name in one
+   cell, reusing the avatar-border convention. */
+.admin-owner { display: inline-flex; align-items: center; gap: 6px; }
+.admin-owner__avatar {
+  width: 20px; height: 20px; border-radius: 50%; object-fit: cover;
+  border: 1.5px solid var(--border-strong); flex: 0 0 auto;
+}
 /* My Videos table (§16.6): fill the full content width so the columns
    spread across the page, and truncate long titles with an ellipsis. */
 .table--user { width: 100%; }
