@@ -41,12 +41,22 @@
       {% endfor %}
     </select>
   </div>
+  {% if tags %}
+  <div class="field">
+    <label class="home-toolbar__label" for="home-tag">Tag</label>
+    <select id="home-tag">
+      <option value="">All tags</option>
+      {% for t in tags %}
+      <option value="{{ t.name }}">{{ t.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  {% endif %}
   <div class="field">
     <label class="home-toolbar__label" for="home-sort">Sort</label>
     <select id="home-sort">
       <option value="newest" selected>Newest</option>
       <option value="oldest">Oldest</option>
-      <option value="most_views">Most views</option>
     </select>
   </div>
 </div>
@@ -64,8 +74,8 @@
      data-title="{{ video['title'] }}"
      data-owner="{{ video['owner_name'] }}"
      data-uploaded-at="{{ video['uploaded_at'] if video['uploaded_at'] else '' }}"
-     data-views="{{ video['view_count'] if video['view_count'] is not none else 0 }}"
-     data-pinned="{{ 1 if video['is_pinned'] else 0 }}">
+     data-pinned="{{ 1 if video['is_pinned'] else 0 }}"
+     data-tags="{{ video['tags'] | map(attribute='name') | join('|') }}">
     {% if video['is_pinned'] %}
     <span class="card__pin">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 0-1-1 2 2 0 0 1-2-2 1 1 0 0 0-2 0 2 2 0 0 1-2 2 1 1 0 0 0-1 1z"/></svg>
@@ -83,6 +93,13 @@
          alt="{{ video['title'] }}" loading="lazy" decoding="async"
          onload="this.classList.add('is-loaded')">
     <div class="card__title">{{ video['title'] }}</div>
+    {% if video['tags'] %}
+    <div class="card__tags">
+      {% for t in video['tags'] %}
+      <span class="card__tag">{{ t.name }}</span>
+      {% endfor %}
+    </div>
+    {% endif %}
     <div class="card__meta">
       <img class="card__avatar"
            src="{{ url_for('home.avatar_file', filename=video['owner_avatar_filename']) if video['owner_avatar_filename'] else url_for('static', filename='img/avatar-default.svg') }}"
@@ -120,6 +137,7 @@
     var waterfall = document.getElementById('waterfall');
     var search = document.getElementById('home-search');
     var ownerSel = document.getElementById('home-owner');
+    var tagSel = document.getElementById('home-tag');
     var sortSel = document.getElementById('home-sort');
     if (!waterfall) return;
     var cards = Array.prototype.slice.call(waterfall.querySelectorAll('.card--video'));
@@ -127,21 +145,27 @@
     function apply() {
       var q = (search.value || '').trim().toLowerCase();
       var owner = ownerSel.value;
-      // 1) Filter: hide non-matching video cards (folders stay untouched).
+      var tag = tagSel ? tagSel.value : '';
+      // 1) Filter: hide non-matching video cards (folders stay untouched). The
+      //    search box matches the title OR any tag name (§bug L67); the tag
+      //    dropdown filters by an exact tag.
       cards.forEach(function (card) {
-        var matchTitle = !q || (card.getAttribute('data-title') || '').toLowerCase().indexOf(q) !== -1;
+        var title = (card.getAttribute('data-title') || '').toLowerCase();
+        var tagList = (card.getAttribute('data-tags') || '').split('|').filter(Boolean);
+        var matchQ = !q || title.indexOf(q) !== -1 ||
+          tagList.some(function (t) { return t.toLowerCase().indexOf(q) !== -1; });
         var matchOwner = !owner || card.getAttribute('data-owner') === owner;
-        card.hidden = !(matchTitle && matchOwner);
+        var matchTag = !tag || tagList.indexOf(tag) !== -1;
+        card.hidden = !(matchQ && matchOwner && matchTag);
       });
-      // 2) Sort: pinned first, then by the chosen order. Re-append visible cards.
+      // 2) Sort: pinned first (keeping their original order — pinned cards are
+      //    unaffected by the sort), then the rest by the chosen order. Re-append
+      //    the visible cards; folders (not .card--video) stay before them.
       var sorted = cards.filter(function (c) { return !c.hidden; }).sort(function (a, b) {
-        var ap = a.getAttribute('data-pinned') ? 1 : 0;
-        var bp = b.getAttribute('data-pinned') ? 1 : 0;
+        var ap = a.getAttribute('data-pinned') === '1' ? 1 : 0;
+        var bp = b.getAttribute('data-pinned') === '1' ? 1 : 0;
         if (ap !== bp) return bp - ap; // pinned first
-        if (sortSel.value === 'most_views') {
-          return (parseInt(b.getAttribute('data-views'), 10) || 0) -
-                 (parseInt(a.getAttribute('data-views'), 10) || 0);
-        }
+        if (ap) return 0; // pinned keep their original order (not sorted)
         var at = a.getAttribute('data-uploaded-at') || '';
         var bt = b.getAttribute('data-uploaded-at') || '';
         // Newest = descending; oldest = ascending (ISO-ish strings compare fine).
@@ -152,6 +176,7 @@
 
     if (search) search.addEventListener('input', apply);
     if (ownerSel) ownerSel.addEventListener('change', apply);
+    if (tagSel) tagSel.addEventListener('change', apply);
     if (sortSel) sortSel.addEventListener('change', apply);
   })();
 </script>

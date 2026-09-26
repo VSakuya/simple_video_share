@@ -17,7 +17,6 @@ from typing import Any, Optional
 
 from flask import (
     Blueprint,
-    Response,
     current_app,
     flash,
     jsonify,
@@ -29,7 +28,7 @@ from flask import (
 )
 from werkzeug.security import generate_password_hash
 
-from .. import db, drive, storage, ws
+from .. import db, drive, storage
 from ..auth import admin_required, current_user
 from ..log import LOG_DIR
 
@@ -119,6 +118,7 @@ def index() -> str:
         video_count=len(db.list_all_videos()),
         user_count=len(db.list_users()),
         room_count=len(db.list_live_rooms()),
+        tag_count=len(db.list_tags()),
     )
 
 
@@ -162,6 +162,48 @@ def logs() -> str:
 def data() -> str:
     """Data & diagnostics subpage (§16.3): export/import + WebSocket test."""
     return render_template("admin_data.html")
+
+
+@admin_bp.route("/tags")
+@admin_required
+def tags() -> str:
+    """All tags: create or delete (§bug L67)."""
+    return render_template("admin_tags.html", tags=db.list_tags())
+
+
+@admin_bp.route("/tags/create", methods=["POST"])
+@admin_required
+def create_tag() -> Any:
+    """Create a tag; returns the new row as HTML so the async form appends it."""
+    name = (request.form.get("name") or "").strip()
+    if not name:
+        if _is_ajax():
+            return jsonify(ok=False, error="Tag name is required."), 400
+        flash("Tag name is required.", "error")
+        return redirect(url_for("admin.tags"))
+    try:
+        tag_id = db.create_tag(name)
+    except Exception:  # UNIQUE violation → a tag with this name already exists
+        if _is_ajax():
+            return jsonify(ok=False, error="A tag with that name already exists."), 409
+        flash("A tag with that name already exists.", "error")
+        return redirect(url_for("admin.tags"))
+    row_html = render_template("_tag_row.html", t={"id": tag_id, "name": name})
+    if _is_ajax():
+        return jsonify(ok=True, message="Tag created.", html=row_html)
+    flash("Tag created.", "success")
+    return redirect(url_for("admin.tags"))
+
+
+@admin_bp.route("/tags/<int:tag_id>/delete", methods=["POST"])
+@admin_required
+def delete_tag(tag_id: int) -> Any:
+    """Delete a tag (its video links are removed too)."""
+    db.delete_tag(tag_id)
+    if _is_ajax():
+        return jsonify(ok=True, message="Tag deleted.")
+    flash("Tag deleted.", "success")
+    return redirect(url_for("admin.tags"))
 
 
 @admin_bp.route("/settings", methods=["POST"])
@@ -301,33 +343,6 @@ def pin_video(video_id: int) -> Any:
     pinned = 0 if video.get("is_pinned") else 1
     db.update_video(video_id, is_pinned=pinned)
     return jsonify(ok=True, pinned=pinned, video_id=video_id)
-
-
-@admin_bp.route("/ws")
-@admin_required
-def websocket_test() -> Any:
-    """Diagnostic: upgrade to WebSocket and echo frames back (§16.7).
-
-    A non-upgrade request (a plain browser GET) gets a 400 so the admin page
-    can tell "WS usable" apart from "not". The button on the Admin page opens
-    a real WebSocket to this endpoint and reports the result.
-    """
-    if request.headers.get("Upgrade", "").lower() != "websocket":
-        return "WebSocket upgrade required (send Upgrade: websocket).", 400
-    key = request.headers.get("Sec-WebSocket-Key", "")
-    if not key:
-        return "Missing Sec-WebSocket-Key header.", 400
-    try:
-        ws.run_echo(request.environ, key)
-    except ConnectionError as exc:
-        # The socket is already gone (the client closed); nothing more to say.
-        logger.info("ws test: connection ended (%s)", exc)
-        return "", 200
-    # The echo loop has taken over the socket. Return an empty direct-passthrough
-    # body so Werkzeug writes no further HTTP to the (now WebSocket) socket.
-    resp = Response(b"", status=200)
-    resp.direct_passthrough = True
-    return resp
 
 
 @admin_bp.route("/export")

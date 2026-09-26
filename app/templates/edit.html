@@ -1,5 +1,10 @@
 {% extends "base.html" %}
 {% block title %}Upload — Simple Video Share{% endblock %}
+{% block head %}
+<!-- DPlayer (§13.39 / §bug L64): the clip preview uses the same player as the
+     watch page so its keyboard/wheel controls apply. -->
+<script src="{{ url_for('static', filename='vendor/dplayer/DPlayer.min.js') }}?v={{ static_version }}"></script>
+{% endblock %}
 {% block content %}
 <div class="upload-page">
   <h1>Clip &amp; edit a video</h1>
@@ -55,7 +60,7 @@
   <div id="clip-panel" class="upload-section hidden">
     <label class="upload-label">Preview &amp; clip</label>
     <div class="upload-timeline" id="clip-timeline">
-      <video id="preview-video" class="upload-timeline__video" controls playsinline></video>
+      <div id="preview-player" class="upload-timeline__player"></div>
       <button type="button" class="clip-fullscreen-btn" id="clip-fs-btn"
               data-inpage-expand="#clip-timeline" title="In-page fullscreen">
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -110,6 +115,22 @@
            placeholder="New folder name">
     <input type="hidden" name="folder_id" id="folder-input" value="">
   </div>
+
+  <!-- Tags (§bug L67): choose from the admin-managed tag library (max 20).
+       Appended to the upload FormData by edit.js's addTags(). -->
+  {% if tags %}
+  <div class="upload-field">
+    <label class="upload-label">Tags</label>
+    <div class="tag-picker">
+      {% for t in tags %}
+      <label class="tag-picker__item">
+        <input type="checkbox" class="tag-checkbox" name="tags" value="{{ t.id }}">
+        <span>{{ t.name }}</span>
+      </label>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
 
   <!-- Submit -->
   <form id="upload-form" method="post" enctype="multipart/form-data"

@@ -132,12 +132,18 @@
   function trim() {
     var empty = feed.querySelector('.live-feed__empty');
     if (empty) empty.remove();
-    // Cap the chat records at MAX_MESSAGES (L62); join/leave notices are not
-    // chat records and are not counted. The oldest message is removed first.
+    // Cap the chat records at MAX_MESSAGES (L62); the oldest message is removed
+    // first. Join/leave notices are capped the same way so the feed never grows
+    // unbounded between messages (L62 addendum: old entries no longer linger).
     var msgs = feed.querySelectorAll('.live-feed__msg');
     while (msgs.length > MAX_MESSAGES) {
       feed.removeChild(msgs[0]);
       msgs = feed.querySelectorAll('.live-feed__msg');
+    }
+    var notices = feed.querySelectorAll('.live-feed__notice');
+    while (notices.length > MAX_MESSAGES) {
+      feed.removeChild(notices[0]);
+      notices = feed.querySelectorAll('.live-feed__notice');
     }
   }
 

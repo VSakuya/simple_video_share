@@ -106,7 +106,20 @@ def delete_video(video_id: int) -> Any:
         flash("You can only delete your own videos.", "error")
         return redirect(url_for("user.index"))
     _purge_video_files(video)
-    db.delete_video(video_id)
+    try:
+        db.delete_video(video_id)
+    except Exception as exc:  # noqa: BLE001 - if the DB row removal fails AFTER the
+        # Drive file is already gone, log it loudly: otherwise we silently leave an
+        # orphan row (Drive deleted, DB row left behind) with no trace in app.log.
+        logger.error(
+            "delete: db row removal failed for id=%s (Drive file already removed): %s",
+            video_id,
+            exc,
+        )
+        if _is_ajax():
+            return jsonify(ok=False, error="Delete failed in the database."), 500
+        flash("Delete failed in the database.", "error")
+        return redirect(url_for("user.index"))
     if _is_ajax():
         return jsonify(ok=True, message="Video deleted.", video_id=video_id)
     flash("Video deleted.", "success")

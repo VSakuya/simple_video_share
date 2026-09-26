@@ -56,7 +56,12 @@ const $ = (id) => document.getElementById(id);
 const dropZone = $("drop-zone");
 const fileInput = $("file-input");
 const clipPanel = $("clip-panel");
-const previewVideo = $("preview-video");
+// DPlayer clip preview (§bug L64): the container always exists; previewVideo is
+// DPlayer's <video> element, assigned when DPlayer is first built (the clip panel
+// is hidden until a file is selected). previewDPlayer guards a second build.
+const previewPlayerEl = $("preview-player");
+let previewVideo = null;
+let previewDPlayer = null;
 const progressPanel = $("progress-panel");
 const progressFill = $("progress-fill");
 const progressStatus = $("progress-status");
@@ -953,11 +958,31 @@ $("clip-end-input").addEventListener("change", () => onTimeInputChanged("clip-en
 // moves the whole timeline into a page-level overlay. Set Start / Set End stay
 // visible at the bottom; no browser Fullscreen API is used.
 
-// Point the preview <video> at a newly selected file (and its object URL).
+// Build the DPlayer clip preview exactly once (idempotent, §bug L64). DPlayer
+// builds its <video> synchronously, so previewVideo is set immediately after.
+function ensurePreviewPlayer() {
+  if (previewDPlayer || !previewPlayerEl || typeof DPlayer === "undefined") return;
+  previewDPlayer = new DPlayer({
+    container: previewPlayerEl,
+    autoplay: false,
+    loop: false,
+    hotkey: false, // the global keydown handler owns Space/arrows (no double-toggle)
+    video: { url: videoUrl }
+  });
+  previewVideo = previewPlayerEl.querySelector("video");
+}
+
+// Point the clip preview at a newly selected file (and its object URL). The
+// first selection builds the DPlayer (which loads videoUrl); later selections
+// just re-point its <video> element at the new URL.
 function setupTimeline(file) {
   if (videoUrl) URL.revokeObjectURL(videoUrl);
   videoUrl = URL.createObjectURL(file);
-  previewVideo.src = videoUrl;
+  if (previewDPlayer) {
+    if (previewVideo) previewVideo.src = videoUrl;
+  } else {
+    ensurePreviewPlayer(); // loads videoUrl itself
+  }
   // No forced mute: the user can play the preview with sound (§13.11). The
   // hidden probe/cover <video> elements stay muted.
   updateClipLabels();
@@ -971,23 +996,25 @@ document.addEventListener("keydown", function (e) {
   const t = e.target;
   if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
   e.preventDefault();
-  // The native <video controls> also toggles play/pause on Space while it has
-  // focus, which double-toggles with ours (the video pauses, then instantly
-  // resumes). Drop focus so only this handler toggles the state.
+  // DPlayer is configured with hotkey: false, so it does not own Space. Drop
+  // focus off the underlying <video> (if it has it) so only this handler
+  // toggles play/pause.
   if (document.activeElement === previewVideo) previewVideo.blur();
   if (previewVideo.paused) previewVideo.play().catch(function () {});
   else previewVideo.pause();
 });
 // Arrow keys nudge the preview ±1 s and the scroll wheel adjusts its volume,
-// but only while the pointer is over the video (§bug L64) so they never fight
-// page scrolling or text entry. Space (above) stays global.
+// but only while the pointer is over the player (§bug L64) so they never fight
+// page scrolling or text entry. Space (above) stays global. Hover is detected on
+// the container (#preview-player) because DPlayer builds its <video> lazily.
 let previewMouseOver = false;
-previewVideo.addEventListener("mouseenter", () => { previewMouseOver = true; });
-previewVideo.addEventListener("mouseleave", () => { previewMouseOver = false; });
+previewPlayerEl.addEventListener("mouseenter", () => { previewMouseOver = true; });
+previewPlayerEl.addEventListener("mouseleave", () => { previewMouseOver = false; });
 document.addEventListener("keydown", function (e) {
   if (!previewMouseOver) return;
   const t = e.target;
   if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
+  if (!previewVideo) return;
   if (e.code === "ArrowLeft") {
     previewVideo.currentTime = Math.max(0, (previewVideo.currentTime || 0) - 1);
     e.preventDefault();
@@ -996,8 +1023,9 @@ document.addEventListener("keydown", function (e) {
     e.preventDefault();
   }
 });
-previewVideo.addEventListener("wheel", function (e) {
+previewPlayerEl.addEventListener("wheel", function (e) {
   e.preventDefault();
+  if (!previewVideo) return;
   const step = e.deltaY < 0 ? 0.05 : -0.05;
   previewVideo.volume = Math.min(1, Math.max(0, (previewVideo.volume == null ? 1 : previewVideo.volume) + step));
 }, { passive: false });
@@ -1016,6 +1044,13 @@ function addMeta(fd) {
     fd.append("bitrate", String(info.bitrateKbps || ""));
     fd.append("fps", String(info.fps || ""));
   }
+}
+// §bug L67: append the checked tag checkboxes (name="tags") to the upload
+// FormData — one "tags" value per checkbox, so the server reads them as a list.
+function addTags(fd) {
+  document.querySelectorAll(".tag-checkbox:checked").forEach(function (cb) {
+    fd.append("tags", cb.value);
+  });
 }
 
 // Human-readable megabytes (one decimal).
@@ -1080,6 +1115,7 @@ async function singleUpload() {
   fd.append("description", descriptionInput.value || "");
   fd.append("folder_id", folderInput.value || "");
   addMeta(fd);
+  addTags(fd);
   clientLog("info", "Uploading (single) " + fmtMB(processedBlob.size));
   setProgress(0, "Uploading…");
   await xhrPost(SVS_BASE + "/upload/submit", fd, makeProgressCb(0, processedBlob.size));
@@ -1121,6 +1157,7 @@ async function segmentedUpload() {
   if (coverBlob) fd.append("cover", coverBlob, "cover.jpg");
   fd.append("description", descriptionInput.value || "");
   addMeta(fd);
+  addTags(fd);
   setProgress(1, "Finalizing…");
   await xhrPost(SVS_BASE + "/upload/seg/finish", fd, () => {});
   $("progress-speed").classList.add("hidden");

@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Tags — Simple Video Share{% endblock %}
+{% block content %}
+<div class="page">
+  <h1>Admin — Tags</h1>
+  {% include "_admin_nav.html" %}
+  <section class="panel">
+    <h2>Create tag</h2>
+    <form id="create-tag-form" method="post" action="{{ url_for('admin.create_tag') }}"
+          data-async data-async-add="#tags-tbody">
+      <div class="settings-grid">
+        <div class="field">
+          <label for="new-tag-name">Name</label>
+          <input id="new-tag-name" type="text" name="name" required maxlength="32">
+        </div>
+      </div>
+      <button type="submit" class="btn">Create tag</button>
+    </form>
+  </section>
+  <section class="panel">
+    <h2>All tags</h2>
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th class="row-actions">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="tags-tbody">
+          {% for t in tags %}
+          <tr class="tag-row" data-tag-id="{{ t.id }}">
+            <td>{{ t.name }}</td>
+            <td class="row-actions">
+              <form method="post" action="{{ url_for('admin.delete_tag', tag_id=t.id) }}"
+                    data-async data-async-remove="tr"
+                    data-confirm="Delete this tag? Videos keep their other tags.">
+                <button type="submit" class="btn btn--danger btn--sm">Delete</button>
+              </form>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="2" class="muted">No tags.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+{% endblock %}

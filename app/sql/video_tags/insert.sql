@@ -1,0 +1,1 @@
+INSERT OR IGNORE INTO video_tags (video_id, tag_id) VALUES (?, ?)

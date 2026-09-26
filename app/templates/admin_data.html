@@ -18,60 +18,6 @@
         <button type="submit" class="btn">Import storage</button>
       </form>
     </div>
-    <hr class="admin-data__hr">
-    <div class="admin-ws">
-      <button type="button" id="ws-test-btn" class="btn">Test WebSocket</button>
-      <span id="ws-test-result" class="muted"></span>
-    </div>
   </section>
 </div>
-<script>
-  (function () {
-    var btn = document.getElementById('ws-test-btn');
-    var out = document.getElementById('ws-test-result');
-    if (!btn) return;
-    function set(msg, ok) {
-      out.textContent = msg;
-      out.classList.remove('muted');
-      out.style.color = ok ? 'var(--flash-success-fg)' : 'var(--flash-error-fg)';
-    }
-    btn.addEventListener('click', function () {
-      set('Connecting…', true);
-      var proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-      var url = proto + '://' + window.location.host + (window.SVS_BASE || '') + '/admin/ws';
-      var ws;
-      try {
-        ws = new WebSocket(url);
-      } catch (e) {
-        set('Failed to open: ' + e, false);
-        return;
-      }
-      var done = false;
-      var timer = setTimeout(function () {
-        if (!done) { done = true; try { ws.close(); } catch (e) {} set('Timed out (no echo within 8s)', false); }
-      }, 8000);
-      ws.onopen = function () { ws.send('ping ' + Date.now()); };
-      ws.onmessage = function (ev) {
-        if (done) return;
-        done = true;
-        clearTimeout(timer);
-        set('OK — server echoed: ' + ev.data, true);
-        try { ws.close(); } catch (e) {}
-      };
-      ws.onerror = function () {
-        if (done) return;
-        done = true;
-        clearTimeout(timer);
-        set('Connection error — WS is not usable (check proxy Upgrade headers).', false);
-      };
-      ws.onclose = function () {
-        if (!done) {
-          done = true;
-          clearTimeout(timer);
-          set('Closed before echo — WS is not usable (check proxy Upgrade headers).', false);
-        }
-      };
-    });
-  })();
-</script>
 {% endblock %}

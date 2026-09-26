@@ -89,6 +89,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute(_sql("migrations", "folders_add_parent"))
     conn.execute(_sql("migrations", "folders_index_parent"))
 
+    # Tags (§bug L67): a flat library + video<->tag junction. These are brand-new
+    # tables, so a single idempotent DDL script (executescript) is all that's
+    # needed on live databases; fresh ones get them from schema.sql.
+    conn.executescript(_sql("migrations", "create_tags"))
+
     # Live rooms: code -> url (§14.6). Old rows keep their stream as
     # "/live/<code>.flv"; the auto-seeded "VSakuya" example gets a neutral title;
     # the legacy code column is then dropped (table rebuild).
@@ -770,3 +775,99 @@ def delete_live_room(room_id: int) -> None:
     conn.execute(_sql("live_rooms", "delete"), (room_id,))
     conn.commit()
     conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Tags (§bug L67)
+# ---------------------------------------------------------------------------
+
+def create_tag(name: str) -> int:
+    """Insert a tag (or return the existing id if ``name`` is already in use)."""
+    name = (name or "").strip()
+    if not name:
+        raise ValueError("Tag name is required.")
+    conn = get_db()
+    row = conn.execute(_sql("tags", "get_by_name"), (name,)).fetchone()
+    if row is not None:
+        conn.close()
+        return int(row["id"])
+    cur = conn.execute(_sql("tags", "insert"), (name,))
+    conn.commit()
+    tag_id = cur.lastrowid
+    assert tag_id is not None
+    conn.close()
+    return int(tag_id)
+
+
+def list_tags() -> list[dict[str, Any]]:
+    """All tags (id + name), case-insensitive alphabetical."""
+    conn = get_db()
+    rows = conn.execute(_sql("tags", "list")).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_tag(tag_id: int) -> dict[str, Any] | None:
+    """One tag by id, or ``None`` if it does not exist."""
+    conn = get_db()
+    row = conn.execute(_sql("tags", "get_by_id"), (tag_id,)).fetchone()
+    conn.close()
+    return dict(row) if row is not None else None
+
+
+def delete_tag(tag_id: int) -> None:
+    """Delete a tag; its ``video_tags`` links cascade away (ON DELETE CASCADE)."""
+    conn = get_db()
+    conn.execute(_sql("tags", "delete"), (tag_id,))
+    conn.commit()
+    conn.close()
+
+
+def get_video_tags(video_id: int) -> list[dict[str, Any]]:
+    """The tags on one video, as ``{"id", "name"}`` dicts (alphabetical)."""
+    conn = get_db()
+    rows = conn.execute(_sql("tags", "video_tags"), (video_id,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def bulk_video_tags(video_ids: list[int]) -> dict[int, list[dict[str, Any]]]:
+    """Map each id in ``video_ids`` to its list of ``{"id","name"}`` tags.
+
+    One query; ids with no tags map to an empty list. Used to annotate the home
+    gallery so the search box can match on tags (§bug L67).
+    """
+    if not video_ids:
+        return {}
+    qmarks = ",".join("?" * len(video_ids))
+    conn = get_db()
+    rows = conn.execute(
+        _sql("tags", "video_tags_bulk").replace("{q}", qmarks),
+        tuple(video_ids),
+    ).fetchall()
+    conn.close()
+    out: dict[int, list[dict[str, Any]]] = {vid: [] for vid in video_ids}
+    for r in rows:
+        out.setdefault(int(r["video_id"]), []).append(
+            {"id": int(r["tag_id"]), "name": r["name"]},
+        )
+    return out
+
+
+def video_tag_ids(video_id: int) -> list[int]:
+    """The tag ids on a video (for pre-selecting the editor's tag checkboxes)."""
+    conn = get_db()
+    rows = conn.execute(_sql("video_tags", "ids"), (video_id,)).fetchall()
+    conn.close()
+    return [int(r[0]) for r in rows]
+
+
+def set_video_tags(video_id: int, tag_ids: list[int]) -> None:
+    """Replace a video's tags with exactly ``tag_ids`` (clear then insert)."""
+    conn = get_db()
+    conn.execute(_sql("video_tags", "clear"), (video_id,))
+    for tid in tag_ids:
+        conn.execute(_sql("video_tags", "insert"), (video_id, int(tid)))
+    conn.commit()
+    conn.close()
+

@@ -139,6 +139,12 @@ function addFiles(files) {
 
 // Resolve the folder selection (applies to the whole queue) into the hidden
 // `folder-input`. "New folder…" is created server-side first (JSON).
+// §bug L67: tag checkboxes are global (applies to the whole queue, like the
+// folder picker). Returns the checked tag ids as strings for the upload FormData.
+function selectedTagIds() {
+  return Array.from(document.querySelectorAll(".tag-checkbox:checked")).map((cb) => cb.value);
+}
+
 async function resolveFolder() {
   const val = folderSelect.value;
   if (val === "__new__") {
@@ -182,7 +188,7 @@ async function processOne(item) {
   setItemStatus(item, "Uploading…");
   await uploadVideo(
     blob,
-    { title: item.title, description: "", folderId: folderInput.value || "", cover, info: outInfo },
+    { title: item.title, description: "", folderId: folderInput.value || "", cover, info: outInfo, tagIds: selectedTagIds() },
     ctx
   );
   setItemStatus(item, "Done");

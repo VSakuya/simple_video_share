@@ -51,14 +51,27 @@ def _render_gallery(**kwargs: Any) -> Any:
     remaining = max(0, cap - cached) if cap > 0 else 0
     quota = drive.get_drive_quota()
     drive_free = quota[2] if quota is not None else None
+    # §bug L67: annotate each video with its tags so the search box can match
+    # on them, and expose the tag library for the tag filter + card badges.
+    videos = _annotate_tags(kwargs.get("videos") or [])
     return render_template(
         "home.html",
         cached_bytes=cached,
         cache_cap_bytes=cap,
         cache_remaining_bytes=remaining,
         drive_free_bytes=drive_free,
-        **kwargs,
+        tags=db.list_tags(),
+        **{**kwargs, "videos": videos},
     )
+
+
+def _annotate_tags(videos: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Attach a ``tags`` list (``[{"id","name"},...]``) to each video."""
+    ids = [v["id"] for v in videos]
+    mapping = db.bulk_video_tags(ids)
+    for v in videos:
+        v["tags"] = mapping.get(v["id"], [])
+    return videos
 
 
 def _breadcrumbs(folder: dict[str, Any]) -> list[dict[str, Any]]:

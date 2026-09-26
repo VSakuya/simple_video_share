@@ -1,0 +1,1 @@
+DELETE FROM video_tags WHERE video_id = ?

@@ -1,0 +1,1 @@
+SELECT tag_id FROM video_tags WHERE video_id = ?

@@ -51,6 +51,25 @@ CREATE TABLE IF NOT EXISTS videos (
     FOREIGN KEY (folder_id) REFERENCES folders (id) ON DELETE SET NULL
 );
 
+-- Tag library (§bug L67): a flat, admin-managed library of tags. ``video_tags``
+-- is the video<->tag junction (no duplicates). Deleting a tag cascades away its
+-- links; deleting a video cascades away its links. The home search box matches a
+-- video when any of its tags contains the search term, and a tag filter shows
+-- only videos carrying the selected tag. Max 20 tags per video (enforced in
+-- the upload handler, not the DB).
+CREATE TABLE IF NOT EXISTS tags (
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    name    TEXT    NOT NULL UNIQUE
+);
+CREATE TABLE IF NOT EXISTS video_tags (
+    video_id  INTEGER NOT NULL,
+    tag_id    INTEGER NOT NULL,
+    PRIMARY KEY (video_id, tag_id),
+    FOREIGN KEY (video_id) REFERENCES videos (id) ON DELETE CASCADE,
+    FOREIGN KEY (tag_id)   REFERENCES tags   (id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_video_tags_tag ON video_tags (tag_id);
+
 CREATE TABLE IF NOT EXISTS settings (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL

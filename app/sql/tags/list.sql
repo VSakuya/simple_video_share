@@ -1,0 +1,1 @@
+SELECT id, name FROM tags ORDER BY name COLLATE NOCASE

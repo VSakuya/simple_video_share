@@ -626,6 +626,12 @@ function addMeta(fd, info) {
 // Upload a final Blob (single POST, or split into <=512 MB segments).
 // `meta` = { title, description, folderId, cover, info } (info is the re-probed
 // output metadata used for the stored duration/resolution/bitrate/fps).
+// §bug L67: append the chosen tags (meta.tagIds) to the upload FormData. The
+// server caps at MAX_TAGS_PER_VIDEO and drops unknown/stale ids.
+function appendTags(fd, meta) {
+  if (meta.tagIds) for (const tid of meta.tagIds) fd.append("tags", String(tid));
+}
+
 export async function uploadVideo(blob, meta, ctx) {
   const log = ctx.log;
   if (blob.size <= SEGMENT_THRESHOLD) {
@@ -635,6 +641,7 @@ export async function uploadVideo(blob, meta, ctx) {
     fd.append("title", meta.title);
     fd.append("description", meta.description || "");
     fd.append("folder_id", meta.folderId || "");
+    appendTags(fd, meta);
     addMeta(fd, meta.info);
     log("info", "Uploading (single) " + fmtMB(blob.size));
     ctx.setProgress(0, "Uploading…");
@@ -673,6 +680,7 @@ export async function uploadVideo(blob, meta, ctx) {
   fd.append("token", token);
   if (meta.cover) fd.append("cover", meta.cover, "cover.jpg");
   fd.append("description", meta.description || "");
+  appendTags(fd, meta);
   addMeta(fd, meta.info);
   ctx.setProgress(1, "Finalizing…");
   await xhrPost(SVS_BASE + "/upload/seg/finish", fd, () => {});

@@ -19,7 +19,7 @@
           <tr class="admin-video-row">
             <td class="vt-cover">
               <img class="row-cover"
-                   src="{{ url_for('home.cover_file', filename=video['cover_filename']) if video['cover_filename'] else url_for('static', filename='img/video-default.svg') }}"
+                   src="{{ url_for('home.cover', filename=video['cover_filename']) if video['cover_filename'] else url_for('static', filename='img/video-default.svg') }}"
                    alt="{{ video['title'] }} thumbnail"
                    loading="lazy" onerror="this.onerror=null;this.src='{{ url_for('static', filename='img/video-default.svg') }}'" onload="this.classList.add('is-loaded')">
             </td>

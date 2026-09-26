@@ -57,6 +57,22 @@
     <input type="hidden" id="folder-input" value="">
   </div>
 
+  <!-- Tags (§bug L67): applied to every video in this queue (global, like folder).
+       Appended to each upload's FormData by pipeline.js's uploadVideo(). -->
+  {% if tags %}
+  <div class="upload-section">
+    <label class="upload-label">Tags <span class="muted">(applies to the whole queue)</span></label>
+    <div class="tag-picker">
+      {% for t in tags %}
+      <label class="tag-picker__item">
+        <input type="checkbox" class="tag-checkbox" name="tags" value="{{ t.id }}">
+        <span>{{ t.name }}</span>
+      </label>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
   <!-- Progress for the file currently being processed -->
   <div id="progress-panel" class="upload-section hidden">
     <label class="upload-label">Progress</label>

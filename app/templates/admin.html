@@ -9,6 +9,10 @@
       <span class="admin-hub__count">{{ video_count }}</span>
       <span class="admin-hub__label">Videos</span>
     </a>
+    <a class="admin-hub__card" href="{{ url_for('admin.tags') }}">
+      <span class="admin-hub__count">{{ tag_count }}</span>
+      <span class="admin-hub__label">Tags</span>
+    </a>
     <a class="admin-hub__card" href="{{ url_for('admin.users') }}">
       <span class="admin-hub__count">{{ user_count }}</span>
       <span class="admin-hub__label">Users</span>

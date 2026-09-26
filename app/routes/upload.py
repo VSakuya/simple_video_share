@@ -42,6 +42,9 @@ logger = logging.getLogger("simple_video_share.routes.upload")
 
 upload_bp = Blueprint("upload", __name__, url_prefix="/upload")
 
+#: Max tags a single video may carry (§bug L67); enforced in the handler.
+MAX_TAGS_PER_VIDEO = 20
+
 
 @upload_bp.route("/")
 @login_required
@@ -57,7 +60,10 @@ def index() -> Any:
     except (TypeError, ValueError):
         max_bitrate_kbps = 5000
     return render_template(
-        "upload.html", folders=folders, max_bitrate_kbps=max_bitrate_kbps
+        "upload.html",
+        folders=folders,
+        max_bitrate_kbps=max_bitrate_kbps,
+        tags=db.list_tags(),
     )
 
 
@@ -79,7 +85,8 @@ def edit() -> Any:
     except (TypeError, ValueError):
         max_bitrate_kbps = 5000
     return render_template(
-        "edit.html", folders=folders, max_bitrate_kbps=max_bitrate_kbps
+        "edit.html", folders=folders, max_bitrate_kbps=max_bitrate_kbps,
+        tags=db.list_tags(),
     )
 
 
@@ -300,6 +307,29 @@ def _check_space(base_dir: str, incoming: int) -> tuple[bool, str]:
     return True, ""
 
 
+def _tag_ids_from_form() -> list[int]:
+    """Valid tag ids from the ``tags`` checkboxes, capped at MAX_TAGS_PER_VIDEO.
+
+    The tag library is admin-managed; a stale/unknown id (a tag deleted between
+    page load and submit) is dropped silently rather than erroring the upload.
+    """
+    raw = request.form.getlist("tags")
+    if not raw:
+        return []
+    valid = {t["id"] for t in db.list_tags()}
+    ids: list[int] = []
+    for value in raw:
+        try:
+            tid = int(value)
+        except (TypeError, ValueError):
+            continue
+        if tid in valid and tid not in ids:
+            ids.append(tid)
+        if len(ids) >= MAX_TAGS_PER_VIDEO:
+            break
+    return ids
+
+
 def _register_and_enqueue(
     owner_id: int,
     title: str,
@@ -334,6 +364,12 @@ def _register_and_enqueue(
     except Exception as exc:  # noqa: BLE001 - surface a friendly error
         logger.error("register: could not create video row: %s", exc)
         return None, "Could not create the video record."
+
+    # §bug L67: associate the tags chosen on the upload form. Both the single
+    # and segmented flows POST them, so this one spot covers both.
+    tag_ids = _tag_ids_from_form()
+    if tag_ids:
+        db.set_video_tags(video_id, tag_ids)
 
     local_path = os.path.join(str(videos_dir), video_name)
     # Move the moov atom to the front (faststart) so Range streaming can start

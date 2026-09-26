@@ -273,6 +273,18 @@ button:hover { filter: brightness(1.1); }
 }
 .card__cover.is-loaded { opacity: 1; }
 .card__title { padding: 8px 10px 0; font-size: 0.9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card__tags { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px 10px 0; }
+.card__tag {
+  font-size: 0.68rem; padding: 1px 7px; border-radius: 999px;
+  background: var(--color-surface-2, #e7e9f1); color: var(--color-text-muted, #5b6472);
+}
+.tag-picker { display: flex; flex-wrap: wrap; gap: 6px; }
+.tag-picker__item {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 9px; border: 1px solid var(--color-border); border-radius: 999px;
+  font-size: 0.8rem; cursor: pointer;
+}
+.tag-picker__item input { margin: 0; }
 .card__meta {
   padding: 0 10px 8px;
   font-size: 0.8rem;
@@ -825,6 +837,16 @@ button:hover { filter: brightness(1.1); }
   margin-bottom: 8px;
 }
 
+/* DPlayer clip preview (§bug L64): width-fills, height from the video's aspect
+   ratio (DPlayer sets it). No max-height cap — the watch page uses the same. */
+.upload-timeline__player {
+  width: 100%;
+  border-radius: 8px;
+  background: #000;
+  margin-bottom: 8px;
+  overflow: hidden;
+}
+
 /* In-page fullscreen state (§13.26): the video fills the screen and the clip
    controls stay pinned at the bottom. The whole timeline is moved into the
    overlay, so the Set Start / Set End controls remain visible. */
@@ -839,6 +861,13 @@ button:hover { filter: brightness(1.1); }
   width: 100%;
   border-radius: 0;
   object-fit: contain;
+  margin-bottom: 0;
+}
+.upload-timeline.inpage-overlay__fill .upload-timeline__player {
+  flex: 1 1 auto;
+  max-height: none;
+  width: 100%;
+  border-radius: 0;
   margin-bottom: 0;
 }
 .upload-timeline.inpage-overlay__fill .upload-clip-controls {
@@ -1451,8 +1480,6 @@ button:disabled { opacity: 0.55; cursor: not-allowed; filter: none; }
 .admin-data { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 .admin-data__import { display: flex; align-items: center; gap: 8px; flex: 1 1 340px; }
 .admin-data__import input[type="file"] { flex: 1 1 auto; }
-.admin-data__hr { margin: 16px 0; border: none; border-top: 1px solid var(--border); }
-.admin-ws { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 
 /* ===== Live room page: player + right panel (§16.8) ===== */
 /* Two columns: a big player (1fr) and a fixed 24rem side panel. The row is

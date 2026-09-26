@@ -12,11 +12,12 @@ database, and registers all route blueprints.
 
 import hashlib
 import mimetypes
-from datetime import timedelta
+import time
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from flask import Flask, redirect, request, url_for
+from flask import Flask, redirect, request, session, url_for
 
 from . import config as app_config
 from . import db
@@ -188,6 +189,30 @@ def create_app() -> Flask:
         if request.path in ("/auth/change-password", "/auth/logout", "/auth/login"):
             return None
         return redirect(url_for("auth.change_password"))
+
+    @app.before_request
+    def _track_last_seen() -> Any:
+        """Record the user's most recent visit so the admin "Last seen" column
+        reflects activity, not just the most recent login. Throttled to at most
+        one DB write per 60 s per session (checked via the session, so a
+        request only costs a session read until the throttle lapses).
+        """
+        if request.path.startswith("/static"):
+            return None
+        from .auth import current_user
+        user = current_user()
+        if user is None:
+            return None
+        now = time.time()
+        last = session.get("last_seen_db")
+        if last is not None and now - last < 60:
+            return None
+        db.update_user(
+            user["id"],
+            last_login_at=datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+        )
+        session["last_seen_db"] = now
+        return None
 
     # When mounted under a subpath (e.g. "/video" behind an Apache reverse proxy),
     # tell Flask where it lives so url_for() and the /static handler emit
