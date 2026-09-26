@@ -19,9 +19,9 @@ import logging
 from pathlib import Path
 from typing import Any, Optional
 
-from flask import Blueprint, abort, current_app, flash, jsonify, redirect, render_template, request, url_for
+from flask import Blueprint, Response, abort, current_app, flash, jsonify, redirect, render_template, request, url_for
 
-from .. import db, storage
+from .. import db, presence, storage
 from ..auth import current_user, login_required
 from ..live_probe import probe_stream
 
@@ -50,6 +50,24 @@ def _valid_live_url(url: str) -> bool:
     if url.startswith("/"):
         return True
     return url.startswith("http://") or url.startswith("https://")
+
+
+#: Max length of one chat message, in characters after trim (§16.8).
+_MAX_CHAT_LEN = 500
+
+
+def _me_info(user: dict[str, Any]) -> dict[str, Any]:
+    """The presence/chat payload for a user: id, name, avatar URL (§16.8)."""
+    avatar = user.get("avatar_filename")
+    return {
+        "id": user["id"],
+        "username": user["username"],
+        "avatar_url": (
+            url_for("home.avatar_file", filename=avatar)
+            if avatar
+            else url_for("static", filename="img/avatar-default.svg")
+        ),
+    }
 
 
 def _delete_cover_file(filename: str) -> None:
@@ -111,6 +129,54 @@ def view(room_id: int) -> Any:
     if room is None:
         abort(404)
     return render_template("live_view.html", room=room)
+
+
+@live_bp.route("/<int:room_id>/presence")
+@login_required
+def presence_stream(room_id: int) -> Any:
+    """SSE feed for the room: join/leave presence + ephemeral chat (§16.8).
+
+    One long-lived ``text/event-stream`` per browser tab. The client gets an
+    immediate ``state`` (online count), then live ``join``/``leave``/``message``
+    events. Buffering is disabled explicitly: the dev server streams fine, but
+    a reverse proxy in front (Apache) would otherwise hold the events back.
+    """
+    room = db.get_live_room(room_id)
+    if room is None:
+        abort(404)
+    me = current_user()
+    assert me is not None
+    # The generator never touches the Flask context (me_info is built here),
+    # so it can be returned as-is: Werkzeug closes it on client disconnect and
+    # its finally block does the presence cleanup.
+    resp = Response(presence.stream(room_id, _me_info(me)), mimetype="text/event-stream")
+    resp.headers["Cache-Control"] = "no-cache, no-transform"
+    resp.headers["X-Accel-Buffering"] = "no"
+    resp.headers["Connection"] = "keep-alive"
+    return resp
+
+
+@live_bp.route("/<int:room_id>/chat", methods=["POST"])
+@login_required
+def chat(room_id: int) -> Any:
+    """Post one ephemeral chat message to the room (§16.8).
+
+    JSON ``{"text": "..."}``; the message is broadcast to every open presence
+    connection in the room and stored nowhere.
+    """
+    room = db.get_live_room(room_id)
+    if room is None:
+        abort(404)
+    me = current_user()
+    assert me is not None
+    data = request.get_json(silent=True) or {}
+    text = str(data.get("text", "")).strip()
+    if not text:
+        return jsonify(ok=False, error="Message is empty."), 400
+    if len(text) > _MAX_CHAT_LEN:
+        return jsonify(ok=False, error="Message is too long."), 400
+    presence.broadcast_message(room_id, _me_info(me), text)
+    return jsonify(ok=True)
 
 
 @live_bp.route("/room", methods=["POST"])

@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}{{ room['title'] }} — Live — Simple Video Share{% endblock %}
+{% block body_class %}page--live{% endblock %}
 {% block head %}
 <!-- DPlayer (§13.39, injects its own CSS/icons) + flv.js (§13.41, vendored,
      exposes the global `flvjs`). Both are local; no CDN dependency. -->
@@ -12,18 +13,39 @@
   <span class="breadcrumb__sep">/</span>
   <span class="breadcrumb__current">{{ room['title'] }}</span>
 </nav>
-<h1 class="watch-title">{{ room['title'] }}</h1>
-<div class="live-view__author">
-  <img class="live-view__avatar"
-       src="{{ url_for('home.avatar_file', filename=room['owner_avatar']) if room['owner_avatar'] else url_for('static', filename='img/avatar-default.svg') }}"
-       alt="{{ room['owner_username'] or 'Unknown' }}">
-  <span class="live-view__name">{{ room['owner_username'] or 'Unknown' }}</span>
-</div>
-{% if room['description'] %}
-<p class="live-view__description">{{ room['description'] }}</p>
-{% endif %}
-<div class="player-wrap" id="player-wrap">
-  <div id="dplayer"></div>
+<!-- Live room page (§16.8): big player on the left, fixed-width panel on the
+     right (title, owner, online count, one mixed feed, composer). -->
+<div class="live-page">
+  <div class="live-player">
+    <div class="player-wrap" id="player-wrap">
+      <div id="dplayer"></div>
+    </div>
+  </div>
+  <div class="live-side">
+    <div class="live-side__inner">
+      <div class="live-side__header">
+        <h1 class="live-side__title">{{ room['title'] }}</h1>
+        <div class="live-view__author">
+          <img class="live-view__avatar"
+               src="{{ url_for('home.avatar_file', filename=room['owner_avatar']) if room['owner_avatar'] else url_for('static', filename='img/avatar-default.svg') }}"
+               alt="{{ room['owner_username'] or 'Unknown' }}">
+          <span class="live-view__name">{{ room['owner_username'] or 'Unknown' }}</span>
+        </div>
+        {% if room['description'] %}
+        <p class="live-view__description">{{ room['description'] }}</p>
+        {% endif %}
+        <div class="live-side__online">Online: <strong id="live-online">…</strong></div>
+      </div>
+      <div class="live-feed" id="live-feed" aria-live="polite">
+        <div class="live-feed__empty">No messages yet — say hello.</div>
+      </div>
+      <form class="live-composer" id="live-composer">
+        <input class="live-composer__input" id="live-input" type="text"
+               placeholder="Send a message…" maxlength="500" autocomplete="off">
+        <button type="submit">Send</button>
+      </form>
+    </div>
+  </div>
 </div>
 <script>
 // DPlayer + flv.js live player (§13.41): the same customFlv integration as the
@@ -91,6 +113,100 @@
   window.addEventListener('beforeunload', function () {
     if (chaser) clearInterval(chaser);
     if (flvPlayer) { try { flvPlayer.destroy(); } catch (e) { /* ignore */ } }
+  });
+})();
+</script>
+<script>
+// Live presence + ephemeral chat (§16.8): one EventSource to the SSE endpoint;
+// join/leave notices and chat messages share the single feed. All user text is
+// inserted via textContent (never innerHTML), so chat cannot inject markup.
+(function () {
+  'use strict';
+  var presenceUrl = {{ url_for('live.presence_stream', room_id=room['id']) | tojson }};
+  var chatUrl = {{ url_for('live.chat', room_id=room['id']) | tojson }};
+  var feed = document.getElementById('live-feed');
+  var onlineEl = document.getElementById('live-online');
+  var form = document.getElementById('live-composer');
+  var input = document.getElementById('live-input');
+  var MAX_ROWS = 200;
+
+  function trim() {
+    var empty = feed.querySelector('.live-feed__empty');
+    if (empty) empty.remove();
+    while (feed.children.length > MAX_ROWS) {
+      feed.removeChild(feed.firstElementChild);
+    }
+  }
+
+  function scrollDown() {
+    feed.scrollTop = feed.scrollHeight;
+  }
+
+  function notice(text) {
+    var row = document.createElement('div');
+    row.className = 'live-feed__notice';
+    row.textContent = text;
+    feed.appendChild(row);
+    trim();
+    scrollDown();
+  }
+
+  function message(user, text) {
+    var row = document.createElement('div');
+    row.className = 'live-feed__msg';
+    var img = document.createElement('img');
+    img.className = 'live-feed__avatar';
+    img.src = user.avatar_url;
+    img.alt = '';
+    var body = document.createElement('div');
+    body.className = 'live-feed__body';
+    var name = document.createElement('span');
+    name.className = 'live-feed__name';
+    name.textContent = user.username;
+    var textEl = document.createElement('span');
+    textEl.className = 'live-feed__text';
+    textEl.textContent = text;
+    body.appendChild(name);
+    body.appendChild(textEl);
+    row.appendChild(img);
+    row.appendChild(body);
+    feed.appendChild(row);
+    trim();
+    scrollDown();
+  }
+
+  var es = new EventSource(presenceUrl);
+  es.addEventListener('message', function (e) {
+    var data = JSON.parse(e.data);
+    if (data.type === 'state') {
+      onlineEl.textContent = String(data.online);
+    } else if (data.type === 'join') {
+      notice(data.user.username + ' joined the room');
+    } else if (data.type === 'leave') {
+      notice(data.user.username + ' left the room');
+    } else if (data.type === 'message') {
+      message(data.user, data.text);
+    }
+  });
+  // EventSource reconnects on its own; the server treats each reconnect as a
+  // fresh connection, cleans up the old one on disconnect, and dedupes by
+  // user_id (§16.8) — so page refreshes are safe.
+  es.addEventListener('error', function () { /* reconnect is automatic */ });
+
+  form.addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    var text = input.value.trim();
+    if (!text) return;
+    fetch(chatUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: text })
+    }).then(function (res) {
+      if (res.ok) {
+        input.value = '';
+        input.focus();
+      }
+    });
   });
 })();
 </script>

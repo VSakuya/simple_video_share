@@ -31,7 +31,7 @@
   <script src="{{ url_for('static', filename='js/inpage.js') }}?v={{ static_version }}"></script>
   {% block head %}{% endblock %}
 </head>
-<body>
+<body class="{% block body_class %}{% endblock %}">
   <!-- Mobile top bar (hidden on desktop, where the sidebar is always visible) -->
   <header class="topbar">
     <button type="button" class="topbar__menu" id="sidebar-toggle"
