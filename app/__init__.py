@@ -157,6 +157,24 @@ def create_app() -> Flask:
             return f"{kbps / 1000:.1f} Mbps"
         return f"{kbps:.0f} kbps"
 
+    @app.template_filter("tojson_attr")
+    def _tojson_attr(value: Any) -> "Markup":
+        """Serialize ``value`` to JSON and escape it for use inside a
+        double-quoted HTML attribute (e.g. ``data-tags``).
+
+        Returns a ``Markup`` (treated as already-safe) so the browser's
+        ``getAttribute`` -> ``JSON.parse`` round-trips cleanly. ``ensure_ascii``
+        keeps the JSON pure-ASCII, and ``html.escape(..., quote=True)`` turns
+        ``"`` into ``&quot;`` and any ``&`` into ``&amp;`` with single escaping.
+        Use as ``data-...="{{ value | tojson_attr }}"`` (no ``| safe`` needed).
+        """
+        import json
+        import html
+        from markupsafe import Markup
+        payload = json.dumps(value, ensure_ascii=True)
+        return Markup(html.escape(payload, quote=True))
+
+
     @app.context_processor
     def inject_globals():
         from .auth import current_user

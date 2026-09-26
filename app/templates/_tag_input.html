@@ -11,7 +11,7 @@
 {# field's autocomplete from the library. #}
 <div class="tag-input"
      data-max-tags="{{ max_tags | default(20) }}"
-     data-tags="{{ tags | tojson }}">
+     data-tags="{{ tags | tojson_attr }}">
   <input type="text" class="tag-input__field"
          list="tag-library" placeholder="Add a tag…" maxlength="32" autocomplete="off">
 </div>

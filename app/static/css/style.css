@@ -1142,7 +1142,11 @@ button:disabled { opacity: 0.55; cursor: not-allowed; filter: none; }
   max-height: calc(100vh - 2rem);
   box-sizing: border-box;
 }
-.edit-dialog .dialog-card { width: 540px; }
+.edit-dialog .dialog-card { width: 640px; }
+/* Edit dialog: stack the existing tags as chips above the add-tag field (which
+   fills its own full-width line) instead of sitting inline with them. Scoped to
+   the edit dialog so the shared .tag-input on upload/clip pages stays inline. */
+.edit-dialog .tag-input__field { flex: 1 1 100%; }
 .crop-dialog .dialog-card { width: 85vw; max-width: 900px; overflow-x: hidden; overflow-y: auto; }
 .confirm-dialog .dialog-card p { margin: 0 0 6px; }
 .dialog-actions {
