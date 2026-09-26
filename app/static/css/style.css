@@ -92,6 +92,10 @@ h2 { font-size: 1.1rem; }
 h3 { font-size: 1rem; }
 /* Watch-page video title: larger than a generic h1 for readability (§13.33). */
 .watch-title { font-size: 1.6rem; font-weight: 700; line-height: 1.25; margin: 0 0 14px; }
+/* Watch page: the video's tag pills under the title (§16.17). Reuses the home
+   card pill (.card__tag) for a consistent look; the negative top margin tightens
+   the gap so the pills read as a subtitle. */
+.watch-tags { display: flex; flex-wrap: wrap; gap: 4px; margin: -8px 0 14px; }
 p { font-size: 0.95rem; }
 input, select, textarea { font-size: 0.9rem; padding: 0.45em 0.7em; }
 input[type="file"] { font-size: 0.85rem; }

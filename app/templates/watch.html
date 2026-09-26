@@ -8,6 +8,13 @@
 {% block content %}
 {% set video_id = video['id'] %}
 <h1 class="watch-title">{{ video['title'] }}</h1>
+{% if video_tags %}
+<div class="watch-tags">
+  {% for t in video_tags %}
+  <span class="card__tag">{{ t.name }}</span>
+  {% endfor %}
+</div>
+{% endif %}
 <div class="player-wrap" id="player-wrap" {% if not is_cached %}style="display:none"{% endif %}>
   <div id="dplayer"></div>
 </div>

@@ -66,6 +66,7 @@ def page(video_id: int) -> str:
         max_comment_length=MAX_COMMENT_LENGTH,
         is_cached=_is_cached(video),
         has_drive=bool(video.get("google_drive_file_id")),
+        video_tags=db.get_video_tags(video_id),
     )
 
 
