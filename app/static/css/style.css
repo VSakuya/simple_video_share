@@ -278,13 +278,29 @@ button:hover { filter: brightness(1.1); }
   font-size: 0.68rem; padding: 1px 7px; border-radius: 999px;
   background: var(--color-surface-2, #e7e9f1); color: var(--color-text-muted, #5b6472);
 }
-.tag-picker { display: flex; flex-wrap: wrap; gap: 6px; }
-.tag-picker__item {
-  display: inline-flex; align-items: center; gap: 5px;
-  padding: 3px 9px; border: 1px solid var(--color-border); border-radius: 999px;
-  font-size: 0.8rem; cursor: pointer;
+/* Shared tag chip input (§16.14 follow-up). Selected tags show as accent pills
+   with a remove control; a trailing text field adds more (taginput.js). */
+.tag-input { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.tag-input__chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 4px 3px 10px; border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  font-size: 0.8rem; color: var(--text);
 }
-.tag-picker__item input { margin: 0; }
+.tag-input__label { white-space: nowrap; }
+.tag-input__remove {
+  border: none; cursor: pointer; font-size: 1rem; line-height: 1;
+  padding: 0 7px; border-radius: 999px;
+  background: transparent; color: var(--text);
+}
+.tag-input__remove:hover { background: color-mix(in srgb, var(--accent) 30%, transparent); }
+.tag-input__field {
+  flex: 1 1 140px; min-width: 120px;
+  border: none; outline: none; background: transparent;
+  font-size: 0.8rem; color: var(--text); padding: 3px 2px;
+}
+.tag-input__field::placeholder { color: var(--muted); }
 .card__meta {
   padding: 0 10px 8px;
   font-size: 0.8rem;

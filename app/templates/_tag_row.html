@@ -1,10 +1,12 @@
 <tr class="tag-row" data-tag-id="{{ t['id'] }}">
   <td>{{ t['name'] }}</td>
   <td class="row-actions">
+    {% if user_is_admin %}
     <form method="post" action="{{ url_for('admin.delete_tag', tag_id=t['id']) }}"
           data-async data-async-remove="tr"
           data-confirm="Delete this tag? Videos keep their other tags.">
       <button type="submit" class="btn btn--danger btn--sm">Delete</button>
     </form>
+    {% endif %}
   </td>
 </tr>

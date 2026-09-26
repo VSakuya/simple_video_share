@@ -29,7 +29,7 @@ from flask import (
 from werkzeug.security import generate_password_hash
 
 from .. import db, drive, storage
-from ..auth import admin_required, current_user
+from ..auth import admin_required, current_user, login_required
 from ..log import LOG_DIR
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/admin")
@@ -165,14 +165,14 @@ def data() -> str:
 
 
 @admin_bp.route("/tags")
-@admin_required
+@login_required
 def tags() -> str:
-    """All tags: create or delete (§bug L67)."""
+    """All tags: any user creates, admins delete (§bug L67)."""
     return render_template("admin_tags.html", tags=db.list_tags())
 
 
 @admin_bp.route("/tags/create", methods=["POST"])
-@admin_required
+@login_required
 def create_tag() -> Any:
     """Create a tag; returns the new row as HTML so the async form appends it."""
     name = (request.form.get("name") or "").strip()
@@ -190,7 +190,7 @@ def create_tag() -> Any:
         return redirect(url_for("admin.tags"))
     row_html = render_template("_tag_row.html", t={"id": tag_id, "name": name})
     if _is_ajax():
-        return jsonify(ok=True, message="Tag created.", html=row_html)
+        return jsonify(ok=True, message="Tag created.", html=row_html, tag_id=tag_id, name=name)
     flash("Tag created.", "success")
     return redirect(url_for("admin.tags"))
 

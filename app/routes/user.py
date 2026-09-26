@@ -18,6 +18,7 @@ from flask import (
 from .. import db, drive, storage
 from .. import drive_worker
 from ..auth import current_user, login_required
+from .upload import _tag_ids_from_form
 
 user_bp = Blueprint("user", __name__, url_prefix="/user")
 logger = logging.getLogger("simple_video_share.routes.user")
@@ -28,10 +29,15 @@ logger = logging.getLogger("simple_video_share.routes.user")
 def index() -> str:
     me = current_user()
     videos = db.list_videos_by_owner(me["id"]) if me else []
+    if me:
+        tag_map = db.bulk_video_tags([v["id"] for v in videos])
+        for v in videos:
+            v["tag_ids"] = [t["id"] for t in tag_map.get(v["id"], [])]
     folders = db.folders_tree(me["id"]) if me else []
     folders_flat = db.folders_with_depth(me["id"]) if me else []
     return render_template(
-        "user.html", videos=videos, folders=folders, folders_flat=folders_flat
+        "user.html", videos=videos, folders=folders, folders_flat=folders_flat,
+        tags=db.list_tags(),
     )
 
 
@@ -129,7 +135,7 @@ def delete_video(video_id: int) -> Any:
 @user_bp.route("/videos/<int:video_id>/edit", methods=["POST"])
 @login_required
 def edit_video(video_id: int) -> Any:
-    """Update a video's title and (optionally) its cover image."""
+    """Update a video's title, description, tags, and (optionally) its cover."""
     me = current_user()
     assert me is not None
     video = db.get_video_by_id(video_id)
@@ -161,6 +167,7 @@ def edit_video(video_id: int) -> Any:
             updates["cover_filename"] = new_cover
 
     db.update_video(video_id, **updates)
+    db.set_video_tags(video_id, _tag_ids_from_form())
     flash("Video updated.", "success")
     return redirect(url_for("user.index"))
 

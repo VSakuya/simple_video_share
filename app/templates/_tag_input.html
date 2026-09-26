@@ -1,0 +1,22 @@
+{# Shared tag chip input (§16.14 follow-up). #}
+{# #}
+{# Renders the tag picker for the upload queue, the clip editor and the My #}
+{# Videos edit dialog. `tags` is the full tag library (list of {id, name}); #}
+{# it is carried in `data-tags` so taginput.js can match an existing name as #}
+{# it is typed and look a name up by id when a page pre-fills the selection #}
+{# (SVSTagInput.set). Nothing is pre-selected here — pages call #}
+{# SVSTagInput.set(el, ids) to prefill and SVSTagInput.get(el) to read the #}
+{# chosen ids at submit time. The 20-tag cap + duplicate check are enforced #}
+{# client-side (taginput.js) and again server-side. The datalist feeds the #}
+{# field's autocomplete from the library. #}
+<div class="tag-input"
+     data-max-tags="{{ max_tags | default(20) }}"
+     data-tags="{{ tags | tojson }}">
+  <input type="text" class="tag-input__field"
+         list="tag-library" placeholder="Add a tag…" maxlength="32" autocomplete="off">
+</div>
+<datalist id="tag-library">
+  {% for t in tags %}
+  <option value="{{ t.name }}"></option>
+  {% endfor %}
+</datalist>

@@ -2,8 +2,10 @@
 {% block title %}Tags — Simple Video Share{% endblock %}
 {% block content %}
 <div class="page">
-  <h1>Admin — Tags</h1>
+  <h1>Tags</h1>
+  {% if user_is_admin %}
   {% include "_admin_nav.html" %}
+  {% endif %}
   <section class="panel">
     <h2>Create tag</h2>
     <form id="create-tag-form" method="post" action="{{ url_for('admin.create_tag') }}"
@@ -32,11 +34,13 @@
           <tr class="tag-row" data-tag-id="{{ t.id }}">
             <td>{{ t.name }}</td>
             <td class="row-actions">
+              {% if user_is_admin %}
               <form method="post" action="{{ url_for('admin.delete_tag', tag_id=t.id) }}"
                     data-async data-async-remove="tr"
                     data-confirm="Delete this tag? Videos keep their other tags.">
                 <button type="submit" class="btn btn--danger btn--sm">Delete</button>
               </form>
+              {% endif %}
             </td>
           </tr>
           {% else %}

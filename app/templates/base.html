@@ -215,6 +215,9 @@
   <!-- Generic async form handler + toast (§16.1). Loaded after the confirm
        script so svsConfirm is available; it owns form[data-async]. -->
   <script src="{{ url_for('static', filename='js/async.js') }}?v={{ static_version }}"></script>
+  <!-- Shared tag chip input (§16.14 follow-up). Loaded after async.js so
+       window.svsToast is available; auto-inits every .tag-input on the page. -->
+  <script src="{{ url_for('static', filename='js/taginput.js') }}?v={{ static_version }}"></script>
   <div id="svs-toasts" aria-live="polite"></div>
 
   <!-- Live room cover crop dialog (Cropper.js, mirrors the video cover flow §13.21).

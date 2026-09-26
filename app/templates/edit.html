@@ -44,6 +44,13 @@
     <input type="number" id="max-fps-input" class="upload-input upload-input--narrow" min="1" max="60" step="1" value="60">
   </div>
 
+  <!-- Max bitrate cap for the transcode (never exceeds the admin max; remembered
+       per device via localStorage and reloaded on every visit). -->
+  <div class="upload-section">
+    <label for="max-bitrate-input" class="upload-label">Max bitrate (kbps) <span class="muted">(transcode cap; &le; admin max, remembered on this device)</span></label>
+    <input type="number" id="max-bitrate-input" class="upload-input upload-input--narrow" min="100" max="{{ max_bitrate_kbps }}" step="100" value="{{ max_bitrate_kbps }}">
+  </div>
+
   <!-- Cover -->
   <div id="cover-panel" class="upload-section">
     <label for="cover-input" class="upload-label">Cover <span class="muted">(optional — auto from 60s frame)</span></label>
@@ -116,21 +123,13 @@
     <input type="hidden" name="folder_id" id="folder-input" value="">
   </div>
 
-  <!-- Tags (§bug L67): choose from the admin-managed tag library (max 20).
-       Appended to the upload FormData by edit.js's addTags(). -->
-  {% if tags %}
+  <!-- Tags (§bug L67): choose from the shared tag library (max 20).
+       Shared tag chip input — see _tag_input.html / taginput.js. The chosen ids
+       are appended to the upload FormData by edit.js's addTags(). -->
   <div class="upload-field">
     <label class="upload-label">Tags</label>
-    <div class="tag-picker">
-      {% for t in tags %}
-      <label class="tag-picker__item">
-        <input type="checkbox" class="tag-checkbox" name="tags" value="{{ t.id }}">
-        <span>{{ t.name }}</span>
-      </label>
-      {% endfor %}
-    </div>
+    {% include "_tag_input.html" %}
   </div>
-  {% endif %}
 
   <!-- Submit -->
   <form id="upload-form" method="post" enctype="multipart/form-data"

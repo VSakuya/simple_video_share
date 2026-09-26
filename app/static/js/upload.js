@@ -139,10 +139,12 @@ function addFiles(files) {
 
 // Resolve the folder selection (applies to the whole queue) into the hidden
 // `folder-input`. "New folder…" is created server-side first (JSON).
-// §bug L67: tag checkboxes are global (applies to the whole queue, like the
-// folder picker). Returns the checked tag ids as strings for the upload FormData.
+// §bug L67: tags are global (applies to the whole queue, like the folder
+// picker). Returns the selected tag ids (strings) for the upload FormData,
+// read from the shared tag chip input (taginput.js).
 function selectedTagIds() {
-  return Array.from(document.querySelectorAll(".tag-checkbox:checked")).map((cb) => cb.value);
+  const el = document.querySelector(".tag-input");
+  return el ? SVSTagInput.get(el) : [];
 }
 
 async function resolveFolder() {
@@ -267,6 +269,8 @@ dropZone.addEventListener("drop", (e) => {
 folderSelect.addEventListener("change", () => {
   folderNewName.classList.toggle("hidden", folderSelect.value !== "__new__");
 });
+// §bug L67: tag selection/creation is owned by the shared tag chip input
+// (taginput.js), so no inline new-tag wiring is needed here.
 if (maxBitrateInput) {
   // Restore the user's saved bitrate cap (clamped to the current admin max).
   try {

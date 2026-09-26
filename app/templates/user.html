@@ -74,7 +74,8 @@
                     data-video-id="{{ video['id'] }}"
                     data-title="{{ video['title'] }}"
                     data-description="{{ video['description'] or '' }}"
-                    data-cover="{{ url_for('home.cover', filename=video['cover_filename']) if video['cover_filename'] else url_for('static', filename='img/placeholder.svg') }}">Edit</button>
+                    data-cover="{{ url_for('home.cover', filename=video['cover_filename']) if video['cover_filename'] else url_for('static', filename='img/placeholder.svg') }}"
+                    data-tag-ids="{{ video['tag_ids'] | join(',') }}">Edit</button>
             <form method="post"
                   action="{{ url_for('user.delete_video', video_id=video['id']) }}"
                   data-confirm="Delete this video? This also removes the local copy and the Google Drive file."
@@ -103,6 +104,10 @@
         <div class="upload-section">
           <label for="edit-description" class="upload-label">Description <span class="muted">(optional)</span></label>
           <textarea id="edit-description" name="description" rows="3" class="upload-input"></textarea>
+        </div>
+        <div class="upload-section">
+          <label class="upload-label">Tags <span class="muted">(optional)</span></label>
+          {% include "_tag_input.html" %}
         </div>
         <div class="upload-section">
           <label class="upload-label">Cover <span class="muted">(leave empty to keep current)</span></label>
@@ -157,6 +162,9 @@
       descInput.value = btn.dataset.description || '';
       coverInput.value = '';
       coverPreview.src = btn.dataset.cover;
+      // Pre-fill the shared tag chip input with this video's current tags.
+      SVSTagInput.set(document.querySelector('.tag-input'),
+        (btn.dataset.tagIds || '').split(','));
       dialog.showModal();
     });
   });
@@ -219,6 +227,10 @@
     cropDialog.close();
     coverInput.value = '';
   });
+
+  // The shared tag chip input (taginput.js) owns tag selection/creation, so
+  // no inline new-tag wiring is needed here; the dialog just prefills it via
+  // SVSTagInput.set on open and the form submits the chip hidden inputs natively.
 
   document.getElementById('edit-cancel').addEventListener('click', function () {
     dialog.close();

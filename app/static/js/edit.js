@@ -36,13 +36,21 @@ function getMaxFps() {
   if (!Number.isFinite(n) || n <= 0) return MAX_FPS;
   return Math.min(MAX_FPS, n);
 }
-// Bitrate cap (kbps): the admin "default bitrate" setting, exposed by
-// upload.html as window.SVS_MAX_BITRATE_KBPS. Falls back to 5000 when the
+// Admin max bitrate (kbps): the "default bitrate" setting, exposed by
+// edit.html as window.SVS_MAX_BITRATE_KBPS. This is the upper bound the user's
+// per-upload cap (getMaxBitrate) can never exceed. Falls back to 5000 when the
 // value is missing or invalid (e.g. page loaded without the server var).
 const MAX_BITRATE_KBPS = (() => {
   const n = Number(typeof window !== "undefined" ? window.SVS_MAX_BITRATE_KBPS : NaN);
   return Number.isFinite(n) && n > 0 ? n : 5000;
 })();
+// Per-upload bitrate cap (kbps) the user picks in the form, clamped to the
+// admin max. Read live so it can change any time before the upload starts.
+function getMaxBitrate() {
+  const n = maxBitrateInput ? parseInt(maxBitrateInput.value, 10) : NaN;
+  if (!Number.isFinite(n) || n <= 0) return MAX_BITRATE_KBPS;
+  return Math.min(MAX_BITRATE_KBPS, n);
+}
 // WebCodecs codec ids, in priority order, used by the mediabunny path.
 // "av1" and "avc" are the ids mediabunny's capability checks understand.
 const WEBCODECS_CODEC_PRIORITY = ["av1", "avc"];
@@ -81,6 +89,22 @@ const descriptionInput = $("description-input");
 const folderInput = $("folder-input");
 const fileLabel = $("file-label");
 const videoMeta = $("video-meta");
+const maxBitrateInput = $("max-bitrate-input");
+
+// Restore the user's saved bitrate cap (clamped to the current admin max) and
+// persist it on every change. The key is shared with the upload page so the cap
+// is consistent across both.
+if (maxBitrateInput) {
+  try {
+    const saved = parseInt(localStorage.getItem("svs-max-bitrate"), 10);
+    if (Number.isFinite(saved) && saved > 0) {
+      maxBitrateInput.value = Math.min(MAX_BITRATE_KBPS, saved);
+    }
+  } catch (e) { /* localStorage unavailable (e.g. private mode) */ }
+  maxBitrateInput.addEventListener("change", () => {
+    try { localStorage.setItem("svs-max-bitrate", maxBitrateInput.value); } catch (e) { /* ignore */ }
+  });
+}
 
 // --- Client-side logging (console + on-page panel + POST to the server) ---
 // Every pipeline stage is logged so a failure can be diagnosed from the
@@ -276,6 +300,8 @@ coverCropCancel.addEventListener("click", () => {
 folderSelect.addEventListener("change", () => {
   folderNewName.classList.toggle("hidden", folderSelect.value !== "__new__");
 });
+// §bug L67: tag selection/creation is owned by the shared tag chip input
+// (taginput.js), so no inline new-tag wiring is needed here.
 
 // Resolve the folder selection into the hidden `folder-input` before upload.
 // "New folder…" is created server-side first (JSON) and its id is used.
@@ -541,7 +567,7 @@ function needsTranscode() {
   if (!probeInfo) return true; // unknown caps -> transcode to be safe
   if (probeInfo.height > MAX_HEIGHT) return true;
   if (probeInfo.fps > getMaxFps()) return true;
-  if (probeInfo.bitrateKbps > MAX_BITRATE_KBPS) return true;
+  if (probeInfo.bitrateKbps > getMaxBitrate()) return true;
   return false;
 }
 
@@ -556,27 +582,27 @@ async function processVideo() {
   if (!needsTranscode()) {
     clientLog(
       "info",
-      "Direct pass - no clip and all caps met (height<=" + MAX_HEIGHT + ", fps<=" + getMaxFps() + ", bitrate<=" + MAX_BITRATE_KBPS + " kbps); uploading the original file unchanged."
+      "Direct pass - no clip and all caps met (height<=" + MAX_HEIGHT + ", fps<=" + getMaxFps() + ", bitrate<=" + getMaxBitrate() + " kbps); uploading the original file unchanged."
     );
     return sourceFile; // direct pass (compliant original)
   }
   const clip = clipRange();
 
   // Shared caps: cap the height only when it is known to exceed 1080p (never
-  // upscale), cap fps only when over 60, and cap the bitrate at the admin
-  // limit (preserve lower values). When the probe failed (probeInfo null)
-  // fall back to the full caps so the 1080p / 5000 kb/s limits are respected.
+  // upscale), cap fps only when over 60, and cap the bitrate at the user cap
+  // (≤ admin max; preserve lower values). When the probe failed (probeInfo null)
+  // fall back to the full caps so the 1080p / bitrate limits are respected.
   const capHeight = probeInfo ? (probeInfo.height > MAX_HEIGHT ? MAX_HEIGHT : 0) : MAX_HEIGHT;
   const capFps = probeInfo && probeInfo.fps > getMaxFps() ? getMaxFps() : 0;
   const bitrateKbps = Math.min(
     probeInfo ? probeInfo.bitrateKbps || MAX_BITRATE_KBPS : MAX_BITRATE_KBPS,
-    MAX_BITRATE_KBPS
+    getMaxBitrate()
   );
   clientLog(
     "info",
     "Transcode required (clip=" +
       (clip ? clip.start + "-" + clip.end + "s" : "none") +
-      "; caps: height<=1080, fps<=60, bitrate<=" + MAX_BITRATE_KBPS + " kbps)."
+      "; caps: height<=1080, fps<=60, bitrate<=" + getMaxBitrate() + " kbps)."
   );
 
   // Stage 1 - mediabunny (WebCodecs, hardware accelerated), AV1 then H.264.
@@ -848,15 +874,19 @@ function extractCover() {
 async function extractCoverWithMediabunny() {
   const mb = await loadMediabunny();
   if (!mb) throw new Error("mediabunny unavailable");
+  // Decode the final (clipped/transcoded) file, not the source, so the cover
+  // reflects this clip — repeated clips of one source no longer reuse the
+  // original 60s frame. processedBlob is the source itself on the direct-pass
+  // path, so this is safe for every case.
   const input = new mb.Input({
     formats: getFormats(mb),
-    source: new mb.BlobSource(sourceFile),
+    source: new mb.BlobSource(processedBlob),
   });
   let sample = null;
   try {
     const vt = await input.getPrimaryVideoTrack();
     if (!vt) throw new Error("no video track");
-    const duration = probeInfo ? probeInfo.duration : 0;
+    const duration = (outputInfo && outputInfo.duration) || (probeInfo ? probeInfo.duration : 0);
     const time = Math.min(60, duration); // same 60s mark as the HTML5 path
     // VideoSampleSink is stateless (no close/cancel method) — only the sample
     // must be released.
@@ -878,7 +908,8 @@ async function extractCoverWithMediabunny() {
 
 function extractCoverWithHtml5() {
   return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(sourceFile);
+    // Use the final (clipped/transcoded) file so the cover matches this clip.
+    const url = URL.createObjectURL(processedBlob);
     const v = document.createElement("video");
     v.preload = "auto";
     v.muted = true;
@@ -1045,12 +1076,13 @@ function addMeta(fd) {
     fd.append("fps", String(info.fps || ""));
   }
 }
-// §bug L67: append the checked tag checkboxes (name="tags") to the upload
-// FormData — one "tags" value per checkbox, so the server reads them as a list.
+// §bug L67: append the selected tags (from the shared tag chip input) to the
+// upload FormData — one "tags" value per chip, so the server reads them as a
+// list.
 function addTags(fd) {
-  document.querySelectorAll(".tag-checkbox:checked").forEach(function (cb) {
-    fd.append("tags", cb.value);
-  });
+  const el = document.querySelector(".tag-input");
+  if (!el) return;
+  for (const id of SVSTagInput.get(el)) fd.append("tags", id);
 }
 
 // Human-readable megabytes (one decimal).
