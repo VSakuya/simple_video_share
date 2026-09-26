@@ -1386,14 +1386,12 @@ button:disabled { opacity: 0.55; cursor: not-allowed; filter: none; }
 .live-room-card__title { font-size: 0.9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 2px; }
 .live-room-card__owner { font-size: 0.8rem; margin-bottom: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* Admin hub cards + subpage nav (§16.3). */
-.admin-nav {
-  display: flex;
-  flex-wrap: wrap;
+/* Admin hub cards + subpage back-to-hub button (§16.3). */
+.admin-back { margin: 0 0 18px; }
+.admin-back__btn {
+  display: inline-flex;
+  align-items: center;
   gap: 6px;
-  margin: 0 0 18px;
-}
-.admin-nav__link {
   padding: 6px 14px;
   border-radius: 8px;
   background: var(--panel-2);
@@ -1402,36 +1400,33 @@ button:disabled { opacity: 0.55; cursor: not-allowed; filter: none; }
   text-decoration: none;
   font-size: 0.88rem;
 }
-.admin-nav__link:hover { border-color: var(--accent); }
-.admin-nav__link.is-active {
-  background: var(--active);
-  color: var(--muted);
-  border-color: transparent;
-}
+.admin-back__btn:hover { border-color: var(--accent); }
 .admin-hub {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 18px;
 }
 .admin-hub__card {
   display: block;
   background: var(--panel-2);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 18px;
+  border-radius: 12px;
+  padding: 26px 22px;
   color: var(--text);
   text-decoration: none;
+  transition: border-color 0.15s ease;
 }
 .admin-hub__card:hover { border-color: var(--accent); }
 .admin-hub__count {
   display: block;
-  font-size: 1.8rem;
+  font-size: 2.2rem;
   font-weight: 700;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
+  line-height: 1.2;
 }
-.admin-hub__label { color: var(--muted); font-size: 0.9rem; }
+.admin-hub__label { color: var(--muted); font-size: 1rem; }
 /* Hub card whose "count" is a word (Settings, Logs) instead of a number. */
-.admin-hub__count--text { font-size: 1.15rem; line-height: 1.9rem; }
+.admin-hub__count--text { font-size: 1.4rem; line-height: 2.2rem; }
 
 /* Admin Data & diagnostics panel (§16.7, §16.8): export/import buttons and the
    WebSocket test. */

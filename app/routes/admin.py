@@ -157,6 +157,13 @@ def logs() -> str:
     return render_template("admin_logs.html")
 
 
+@admin_bp.route("/data")
+@admin_required
+def data() -> str:
+    """Data & diagnostics subpage (§16.3): export/import + WebSocket test."""
+    return render_template("admin_data.html")
+
+
 @admin_bp.route("/settings", methods=["POST"])
 @admin_required
 def save_settings() -> Any:

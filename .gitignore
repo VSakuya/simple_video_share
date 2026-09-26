@@ -40,3 +40,4 @@ storage/
 testing/*
 HANDOFF_mediabunny.md
 project_requirements.md
+*.conf

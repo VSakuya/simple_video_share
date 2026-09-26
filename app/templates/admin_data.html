@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Data &amp; diagnostics — Simple Video Share{% endblock %}
+{% block content %}
+<div class="page">
+  <h1>Admin — Data &amp; diagnostics</h1>
+  {% include "_admin_nav.html" %}
+  <section class="panel">
+    <h2>Data &amp; diagnostics</h2>
+    <p class="muted">
+      Export bundles the whole storage area (covers, avatars, database) into a
+      zip — the video cache and logs are left out. Import restores a bundle with
+      path-safety verification.
+    </p>
+    <div class="admin-data">
+      <a class="btn" href="{{ url_for('admin.export_bundle') }}">Export storage (zip)</a>
+      <form method="post" action="{{ url_for('admin.import_bundle') }}" enctype="multipart/form-data" class="admin-data__import">
+        <input type="file" name="archive" accept="application/zip" required>
+        <button type="submit" class="btn">Import storage</button>
+      </form>
+    </div>
+    <hr class="admin-data__hr">
+    <div class="admin-ws">
+      <button type="button" id="ws-test-btn" class="btn">Test WebSocket</button>
+      <span id="ws-test-result" class="muted"></span>
+    </div>
+  </section>
+</div>
+<script>
+  (function () {
+    var btn = document.getElementById('ws-test-btn');
+    var out = document.getElementById('ws-test-result');
+    if (!btn) return;
+    function set(msg, ok) {
+      out.textContent = msg;
+      out.classList.remove('muted');
+      out.style.color = ok ? 'var(--flash-success-fg)' : 'var(--flash-error-fg)';
+    }
+    btn.addEventListener('click', function () {
+      set('Connecting…', true);
+      var proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+      var url = proto + '://' + window.location.host + (window.SVS_BASE || '') + '/admin/ws';
+      var ws;
+      try {
+        ws = new WebSocket(url);
+      } catch (e) {
+        set('Failed to open: ' + e, false);
+        return;
+      }
+      var done = false;
+      var timer = setTimeout(function () {
+        if (!done) { done = true; try { ws.close(); } catch (e) {} set('Timed out (no echo within 8s)', false); }
+      }, 8000);
+      ws.onopen = function () { ws.send('ping ' + Date.now()); };
+      ws.onmessage = function (ev) {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        set('OK — server echoed: ' + ev.data, true);
+        try { ws.close(); } catch (e) {}
+      };
+      ws.onerror = function () {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        set('Connection error — WS is not usable (check proxy Upgrade headers).', false);
+      };
+      ws.onclose = function () {
+        if (!done) {
+          done = true;
+          clearTimeout(timer);
+          set('Closed before echo — WS is not usable (check proxy Upgrade headers).', false);
+        }
+      };
+    });
+  })();
+</script>
+{% endblock %}

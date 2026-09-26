@@ -1,13 +1,4 @@
-{# Admin subpage nav (§16.3). Include at the top of each /admin subpage. #}
-<nav class="admin-nav" aria-label="Admin sections">
-  <a class="admin-nav__link{% if request.path == url_for('admin.videos') %} is-active{% endif %}"
-     href="{{ url_for('admin.videos') }}">Videos</a>
-  <a class="admin-nav__link{% if request.path == url_for('admin.users') %} is-active{% endif %}"
-     href="{{ url_for('admin.users') }}">Users</a>
-  <a class="admin-nav__link{% if request.path == url_for('admin.rooms') %} is-active{% endif %}"
-     href="{{ url_for('admin.rooms') }}">Live rooms</a>
-  <a class="admin-nav__link{% if request.path == url_for('admin.settings') %} is-active{% endif %}"
-     href="{{ url_for('admin.settings') }}">Settings</a>
-  <a class="admin-nav__link{% if request.path == url_for('admin.logs') %} is-active{% endif %}"
-     href="{{ url_for('admin.logs') }}">Logs</a>
+{# Admin subpage: single back-to-hub control (§16.3). Include at the top of each /admin subpage. #}
+<nav class="admin-back" aria-label="Back to admin hub">
+  <a class="admin-back__btn" href="{{ url_for('admin.index') }}">&larr; Back to Admin</a>
 </nav>
