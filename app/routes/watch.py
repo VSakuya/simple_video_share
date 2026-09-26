@@ -341,6 +341,31 @@ def stream(video_id: int) -> Any:
     return send_file(path, conditional=True)
 
 
+@watch_bp.route("/<int:video_id>/download")
+@login_required
+def download(video_id: int) -> Any:
+    """Serve a cached video as a download (§16.5).
+
+    Mirrors ``stream``'s checks (video exists, cached locally) but serves the
+    file with ``as_attachment=True`` and a Range-free response so the browser
+    saves ``<title>.<ext>`` instead of streaming it.
+    """
+    from flask import send_file, abort
+    video = db.get_video_by_id(video_id)
+    if video is None:
+        abort(404)
+    local = video.get("local_filename")
+    if not local:
+        abort(503)
+    path = os.path.join(app_videos_dir(), local)
+    if not os.path.exists(path):
+        abort(503)
+    db.touch_video(video_id)
+    ext = local.rsplit(".", 1)[-1] if "." in local else ""
+    download_name = f"{video['title']}.{ext}" if ext else str(video["title"])
+    return send_file(path, as_attachment=True, download_name=download_name)
+
+
 def app_videos_dir() -> str:
     from flask import current_app
     return str(current_app.config["VIDEOS_DIR"])

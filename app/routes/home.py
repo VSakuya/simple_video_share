@@ -104,7 +104,11 @@ def _drop_missing(videos: list[dict[str, Any]], videos_dir: Any) -> list[dict[st
     base = str(videos_dir)
     for video in videos:
         local = video.get("local_filename")
-        if local and os.path.exists(os.path.join(base, local)):
+        # §16.4: annotate whether a locally playable copy exists so the home
+        # card can badge non-cached (Drive-only) videos.
+        is_cached = bool(local) and os.path.exists(os.path.join(base, local))
+        if is_cached:
+            video["is_cached"] = True
             kept.append(video)
             continue
         drive_id = video.get("google_drive_file_id")
@@ -116,5 +120,7 @@ def _drop_missing(videos: list[dict[str, Any]], videos_dir: Any) -> list[dict[st
                 video.get("id"), video.get("title"), drive_id,
             )
             continue
+        # Kept only because a Drive copy still exists -> not cached locally.
+        video["is_cached"] = False
         kept.append(video)
     return kept

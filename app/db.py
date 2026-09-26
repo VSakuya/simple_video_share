@@ -74,6 +74,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute(_sql("migrations", "videos_add_status"))
     if "drive_resumable_uri" not in video_cols:
         conn.execute(_sql("migrations", "videos_add_drive_resumable_uri"))
+    if "is_pinned" not in video_cols:
+        conn.execute(_sql("migrations", "videos_add_pinned"))
 
     comment_cols = {row[1] for row in conn.execute("PRAGMA table_info(comments)").fetchall()}
     if "parent_id" not in comment_cols:

@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}Logs — Simple Video Share{% endblock %}
+{% block content %}
+<div class="page">
+  <h1>Admin — Logs</h1>
+  {% include "_admin_nav.html" %}
+  <section class="panel">
+    <h2>Logs</h2>
+    <div class="admin-log-controls">
+      <div class="field">
+        <label for="log-source">Source</label>
+        <select id="log-source" name="source">
+          <option value="app" selected>Server</option>
+          <option value="client">Browser pipeline</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="log-level">Level</label>
+        <select id="log-level" name="level">
+          <option value="all" selected>All</option>
+          <option value="INFO">INFO</option>
+          <option value="WARNING">WARNING</option>
+          <option value="ERROR">ERROR</option>
+          <option value="CRITICAL">CRITICAL</option>
+        </select>
+      </div>
+      <button type="button" class="btn" id="log-refresh">Refresh</button>
+    </div>
+    <p id="log-status" class="muted">Loading…</p>
+    <div class="admin-log" id="log-view"></div>
+  </section>
+  <script>
+    // Admin log viewer: fetch the selected log file (filtered by level) and
+    // render it. The server does all filtering; the client only displays. The
+    // lines come from the /admin/logs/data JSON endpoint (§16.3).
+    (function () {
+      var view = document.getElementById('log-view');
+      var status = document.getElementById('log-status');
+      var sourceSel = document.getElementById('log-source');
+      var levelSel = document.getElementById('log-level');
+      var refreshBtn = document.getElementById('log-refresh');
+      var logsUrl = '{{ url_for("admin.logs_data") }}';
+
+      function levelClass(level) {
+        if (level === 'WARNING') return 'admin-log__line--warn';
+        if (level === 'ERROR' || level === 'CRITICAL') return 'admin-log__line--error';
+        if (level === 'DEBUG') return 'admin-log__line--debug';
+        return 'admin-log__line--info';
+      }
+
+      function render(data) {
+        view.innerHTML = '';
+        if (!data.lines.length) {
+          status.textContent = 'No log lines match the current filter.';
+          return;
+        }
+        var frag = document.createDocumentFragment();
+        data.lines.forEach(function (line) {
+          var el = document.createElement('div');
+          el.className = 'admin-log__line ' + levelClass(line.level);
+          el.textContent = line.text;
+          frag.appendChild(el);
+        });
+        view.appendChild(frag);
+        var note = 'Showing ' + data.lines.length + ' of ' + data.total + ' matching lines';
+        if (data.truncated) note += ' (most recent only)';
+        status.textContent = note;
+        view.scrollTop = view.scrollHeight;
+      }
+
+      function load() {
+        status.textContent = 'Loading…';
+        fetch(logsUrl + '?source=' + encodeURIComponent(sourceSel.value) +
+              '&level=' + encodeURIComponent(levelSel.value))
+          .then(function (r) {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.json();
+          })
+          .then(render)
+          .catch(function (err) {
+            view.innerHTML = '';
+            status.textContent = 'Failed to load logs: ' + err.message;
+          });
+      }
+
+      sourceSel.addEventListener('change', load);
+      levelSel.addEventListener('change', load);
+      refreshBtn.addEventListener('click', load);
+      load();
+    })();
+  </script>
+</div>
+{% endblock %}

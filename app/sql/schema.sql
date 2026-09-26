@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS videos (
     size_bytes            INTEGER,
     status                TEXT    NOT NULL DEFAULT 'ready',
     view_count            INTEGER NOT NULL DEFAULT 0,
+    is_pinned             INTEGER NOT NULL DEFAULT 0,
     last_accessed         TEXT,
     created_at            TEXT    NOT NULL DEFAULT (datetime('now')),
     uploaded_at           TEXT    NOT NULL DEFAULT (datetime('now')),

@@ -108,7 +108,13 @@
 <dialog id="avatar-crop-dialog" class="crop-dialog">
   <article class="dialog-card">
     <h2>Crop avatar</h2>
-    <img id="avatar-crop-image" alt="avatar crop">
+    <div class="crop-row">
+      <img id="avatar-crop-image" alt="avatar crop">
+      <div class="crop-preview-wrap">
+        <img id="avatar-crop-preview" class="crop-preview" alt="avatar preview">
+        <div class="crop-preview-cap">Preview</div>
+      </div>
+    </div>
     <div class="dialog-actions">
       <button type="button" class="btn" id="avatar-crop-apply">Crop</button>
       <button type="button" class="btn btn--ghost" id="avatar-crop-cancel">Cancel</button>
@@ -123,6 +129,7 @@
   var preview = document.getElementById('avatar-preview');
   var cropDialog = document.getElementById('avatar-crop-dialog');
   var cropImage = document.getElementById('avatar-crop-image');
+  var cropPreview = document.getElementById('avatar-crop-preview');
   var applyBtn = document.getElementById('avatar-crop-apply');
   var cancelBtn = document.getElementById('avatar-crop-cancel');
   var cropper = null;
@@ -173,6 +180,14 @@
           background: true,
           autoCropArea: 0.8
         });
+        // Live circular preview (§16.2): refresh on every crop and once at init,
+        // so the user sees the final avatar before applying.
+        var updatePreview = function () {
+          var canvas = cropper.getCroppedCanvas({ width: 256, height: 256, imageSmoothingQuality: 'high' });
+          cropPreview.src = canvas.toDataURL('image/jpeg');
+        };
+        cropper.on('crop', updatePreview);
+        updatePreview();
       };
       cropImage.src = src;
     };

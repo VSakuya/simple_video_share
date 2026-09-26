@@ -137,8 +137,8 @@ table { font-size: 0.88rem; }
   padding: 9px 12px; border-radius: 8px;
   color: var(--muted); text-decoration: none; font-size: 0.9rem;
 }
-.sidebar__item .icon { flex: 0 0 1.25rem; display: inline-flex; align-items: center; justify-content: center; }
-.sidebar__item .icon svg { width: 1.1875rem; height: 1.1875rem; display: block; }
+.sidebar__item .icon { flex: 0 0 1.5rem; display: inline-flex; align-items: center; justify-content: center; }
+.sidebar__item .icon svg { width: 1.5rem; height: 1.5rem; display: block; }
 .sidebar__item:hover { background: var(--hover); color: var(--text); }
 .sidebar__item.is-active { background: var(--active); color: var(--text); font-weight: 600; }
 .sidebar__item--out { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 14px; }
@@ -150,8 +150,8 @@ table { font-size: 0.88rem; }
   background: none; border: none; cursor: pointer;
   width: 100%; font-family: inherit; text-align: left;
 }
-.sidebar__theme-toggle .icon { flex: 0 0 1.25rem; display: inline-flex; align-items: center; justify-content: center; }
-.sidebar__theme-toggle .icon svg { width: 1.1875rem; height: 1.1875rem; display: block; }
+.sidebar__theme-toggle .icon { flex: 0 0 1.5rem; display: inline-flex; align-items: center; justify-content: center; }
+.sidebar__theme-toggle .icon svg { width: 1.5rem; height: 1.5rem; display: block; }
 .sidebar__theme-toggle:hover { background: var(--hover); color: var(--text); }
 /* Bottom-left account + logout group (the avatar replaces the Account icon). */
 .sidebar__footer {
@@ -163,13 +163,13 @@ table { font-size: 0.88rem; }
   gap: 2px;
 }
 .sidebar__avatar {
-  width: 1.75rem; height: 1.75rem;
+  width: 2.5rem; height: 2.5rem;
   border-radius: 50%;
   object-fit: cover;
   display: block;
 }
 /* The Account item's icon slot widens to match the larger avatar. */
-.sidebar__item:has(.sidebar__avatar) .icon { flex: 0 0 1.75rem; }
+.sidebar__item:has(.sidebar__avatar) .icon { flex: 0 0 2.5rem; }
 
 /* Collapsed (icon-only) state, YouTube-style. */
 .sidebar-collapsed .sidebar { width: var(--sidebar-w-collapsed); padding: 8px 6px; }
@@ -212,6 +212,20 @@ h1 { font-size: 1.35rem; }
 h2 { font-size: 1.1rem; }
 .muted { color: var(--muted); }
 .hidden { display: none; }
+/* The `hidden` attribute must win over any author `display` (pin badge, home
+   filter, etc.), so it is force-hidden regardless of element display. */
+[hidden] { display: none !important; }
+
+/* Avatar borders (§16.5): a thin visible frame on every user avatar, so faces
+   read clearly on any background. Applied to all avatar <img> selectors. */
+.sidebar__avatar,
+.card__avatar,
+.comment__avatar,
+.avatar-lg,
+.video-author__avatar,
+.live-view__avatar {
+  border: 1.5px solid var(--border-strong);
+}
 
 .auth-card {
   max-width: 360px; margin: 40px auto; background: var(--panel);
@@ -241,6 +255,7 @@ button:hover { filter: brightness(1.1); }
   display: block; margin-bottom: 12px; break-inside: avoid;
   background: var(--panel); border-radius: 8px; overflow: hidden;
   text-decoration: none; color: var(--text);
+  position: relative;
 }
 .card__cover {
   width: 100%; display: block; aspect-ratio: 16 / 9; object-fit: cover;
@@ -267,6 +282,70 @@ button:hover { filter: brightness(1.1); }
 }
 .card__owner { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card__date { flex: 0 0 auto; }
+
+/* Pinned badge (§16.6): a small pin marker over a pinned video card's cover. */
+.card__pin {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.62);
+  color: #ffd24d;
+  font-size: 0.72rem;
+  font-weight: 600;
+  z-index: 1;
+}
+.card__pin svg { width: 12px; height: 12px; }
+/* Remote badge (§16.4): marks a home card whose video is NOT cached locally
+   (it lives on Google Drive and must be downloaded before it can play). */
+.card__remote {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.62);
+  color: #9cc3ff;
+  font-size: 0.72rem;
+  font-weight: 600;
+  z-index: 1;
+}
+.card__remote svg { width: 12px; height: 12px; }
+/* Inline "Pinned" pill, reused anywhere a pinned video is listed (e.g. admin). */
+.pin-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #4d3a10;
+  color: #ffd24d;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+/* Home filter/sort toolbar (§16.4). */
+.home-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+  margin: 0 0 16px;
+  padding: 12px;
+  background: var(--panel);
+  border-radius: 10px;
+}
+.home-toolbar__search { flex: 1 1 220px; }
+.home-toolbar input, .home-toolbar select { height: 40px; }
+.home-toolbar .field { margin-bottom: 0; flex: 0 1 auto; }
+.home-toolbar__label { font-size: 0.82rem; color: var(--muted); }
 
 /* Folder cards on the home page (§13.26): a folder is a full-size cell in the
    waterfall, the same size as a video card — the cover area is a folder glyph
@@ -937,10 +1016,36 @@ button:disabled { opacity: 0.55; cursor: not-allowed; filter: none; }
 }
 .row-actions { text-align: right; white-space: nowrap; }
 .row-actions form { display: inline; }
+.row-actions form + form { margin-left: 8px; }
 /* Pico forces width:100% on button[type=submit]; keep table action buttons inline. */
 .row-actions .btn { width: auto; }
 .row-title { color: var(--accent); text-decoration: none; }
 .row-title:hover { text-decoration: underline; }
+
+/* My Videos table (§16.6): a small cover thumbnail leads each row, plus an
+   upload-time column. The cover fades in on load (like the home cards). */
+.vt-cover { width: 84px; }
+.row-cover {
+  width: 84px; height: 47px; object-fit: cover; border-radius: 5px;
+  background: var(--panel-2); opacity: 0; transition: opacity 0.3s ease;
+  display: block;
+}
+.row-cover.is-loaded { opacity: 1; }
+.vt-uploaded { white-space: nowrap; }
+.vt-size { white-space: nowrap; }
+/* My Videos table (§16.6): fill the full content width so the columns
+   spread across the page, and truncate long titles with an ellipsis. */
+.table--user { width: 100%; }
+/* Keep the per-row Edit/Delete buttons left-aligned (the shared .row-actions
+   rule right-aligns them, which looks wrong on the left-packed table). */
+.table--user .row-actions { text-align: left; }
+.table--user .row-title {
+  display: block;
+  max-width: 320px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 .settings-grid {
   display: grid;
@@ -986,6 +1091,28 @@ button:disabled { opacity: 0.55; cursor: not-allowed; filter: none; }
 .crop-dialog .cropper-container {
   max-width: 100%;
   overflow: hidden;
+}
+/* Avatar crop dialog: two-column layout with a live circular preview (§16.2). */
+.crop-dialog .crop-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 24px;
+  align-items: center;
+}
+.crop-dialog .crop-row .cropper-container { max-width: 100%; }
+.crop-preview-wrap { text-align: center; }
+.crop-preview {
+  width: 140px;
+  height: 140px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--panel-2);
+  border: 2px solid var(--border);
+  display: block;
+}
+.crop-preview-cap { font-size: 0.8rem; color: var(--muted); margin-top: 6px; }
+@media (max-width: 760px) {
+  .crop-dialog .crop-row { grid-template-columns: 1fr; }
 }
 
 /* ===== Video detail panel (watch page) ===== */
@@ -1051,6 +1178,8 @@ button:disabled { opacity: 0.55; cursor: not-allowed; filter: none; }
   flex: 0 0 auto;
 }
 .video-author__name { font-size: 1.25rem; font-weight: 600; }
+/* Download button (§16.5): right-aligned in the uploader row. */
+.video-author__download { margin-left: auto; flex: 0 0 auto; }
 
 /* ===== Comments (watch page, §13.16) ===== */
 .comments {
@@ -1071,6 +1200,35 @@ button:disabled { opacity: 0.55; cursor: not-allowed; filter: none; }
   gap: 4px 6px;
   margin: 6px 0 8px;
 }
+
+/* Generic toast (§16.1): self-dismissing, bottom-center, theme-aware. */
+#svs-toasts {
+  position: fixed;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  z-index: 9999;
+  pointer-events: none;
+}
+.svs-toast {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: inherit;
+  border-radius: 8px;
+  padding: 10px 16px;
+  font-size: 0.9rem;
+  max-width: 90vw;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.svs-toast.is-shown { opacity: 1; transform: translateY(0); }
+.svs-toast--error { border-color: #e05555; }
 .kaomoji-bar__label {
   font-size: 0.8rem;
   color: var(--muted);
@@ -1227,3 +1385,58 @@ button:disabled { opacity: 0.55; cursor: not-allowed; filter: none; }
 .live-room-card__cover { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 6px; background: #000; display: block; margin-bottom: 10px; }
 .live-room-card__title { font-size: 0.9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 2px; }
 .live-room-card__owner { font-size: 0.8rem; margin-bottom: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Admin hub cards + subpage nav (§16.3). */
+.admin-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 18px;
+}
+.admin-nav__link {
+  padding: 6px 14px;
+  border-radius: 8px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  text-decoration: none;
+  font-size: 0.88rem;
+}
+.admin-nav__link:hover { border-color: var(--accent); }
+.admin-nav__link.is-active {
+  background: var(--active);
+  color: var(--muted);
+  border-color: transparent;
+}
+.admin-hub {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 14px;
+}
+.admin-hub__card {
+  display: block;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px;
+  color: var(--text);
+  text-decoration: none;
+}
+.admin-hub__card:hover { border-color: var(--accent); }
+.admin-hub__count {
+  display: block;
+  font-size: 1.8rem;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+.admin-hub__label { color: var(--muted); font-size: 0.9rem; }
+/* Hub card whose "count" is a word (Settings, Logs) instead of a number. */
+.admin-hub__count--text { font-size: 1.15rem; line-height: 1.9rem; }
+
+/* Admin Data & diagnostics panel (§16.7, §16.8): export/import buttons and the
+   WebSocket test. */
+.admin-data { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.admin-data__import { display: flex; align-items: center; gap: 8px; flex: 1 1 340px; }
+.admin-data__import input[type="file"] { flex: 1 1 auto; }
+.admin-data__hr { margin: 16px 0; border: none; border-top: 1px solid var(--border); }
+.admin-ws { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }

@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Videos — Simple Video Share{% endblock %}
+{% block content %}
+<div class="page">
+  <h1>Admin — Videos</h1>
+  {% include "_admin_nav.html" %}
+  <section class="panel">
+    <h2>All videos</h2>
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Title</th><th>Owner</th><th>Status</th><th>Cached</th>
+            <th>Pinned</th><th class="row-actions">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for video in videos %}
+          <tr class="admin-video-row">
+            <td>
+              <a href="{{ url_for('watch.page', video_id=video['id']) }}">{{ video['title'] }}</a>
+              {% if video['folder_name'] %}<span class="muted"> · {{ video['folder_name'] }}</span>{% endif %}
+            </td>
+            <td>{{ video['owner_name'] }}</td>
+            <td>{{ video['status'] }}</td>
+            <td>{{ 'yes' if video['local_filename'] else 'no' }}</td>
+            <td>
+              <span class="pin-badge" data-pin-badge{% if not video['is_pinned'] %} hidden{% endif %}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 0-1-1 2 2 0 0 1-2-2 1 1 0 0 0-2 0 2 2 0 0 1-2 2 1 1 0 0 0-1 1z"/></svg>
+                Pinned
+              </span>
+            </td>
+            <td class="row-actions">
+              <form method="post" action="{{ url_for('admin.pin_video', video_id=video['id']) }}"
+                    data-async data-async-action="pin">
+                <button type="submit" class="btn btn--sm">{{ 'Unpin' if video['is_pinned'] else 'Pin' }}</button>
+              </form>
+              <form method="post" action="{{ url_for('user.delete_video', video_id=video['id']) }}"
+                    data-async data-async-remove="tr"
+                    data-confirm="Delete this video? This also removes the local copy and the Google Drive file.">
+                <button type="submit" class="btn btn--danger btn--sm">Delete</button>
+              </form>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="6" class="muted">No videos.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  <script>
+    // Pin/unpin toggle (§16.6): async.js dispatches here after the fetch.
+    window.svsAsyncActions = window.svsAsyncActions || {};
+    window.svsAsyncActions.pin = function (form, data) {
+      var row = form.closest('tr');
+      if (!row) return;
+      var pinned = !!data.pinned;
+      var btn = form.querySelector('button[type="submit"]');
+      if (btn) btn.textContent = pinned ? 'Unpin' : 'Pin';
+      var badge = row.querySelector('[data-pin-badge]');
+      if (badge) badge.hidden = !pinned;
+    };
+  </script>
+</div>
+{% endblock %}

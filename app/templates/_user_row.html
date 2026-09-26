@@ -1,0 +1,12 @@
+<tr class="user-row" data-user-id="{{ u['id'] }}">
+  <td>
+    {{ u['username'] }}
+    {% if u['is_admin'] %}<span class="badge badge--admin">admin</span>{% endif %}
+  </td>
+  <td class="row-actions">
+    <form method="post" action="{{ url_for('admin.delete_user', user_id=u['id']) }}"
+          data-async data-async-remove="tr" data-confirm="Delete this user?">
+      <button type="submit" class="btn btn--danger btn--sm">Delete</button>
+    </form>
+  </td>
+</tr>

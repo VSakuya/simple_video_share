@@ -198,6 +198,7 @@
       document.querySelectorAll('form[data-confirm]').forEach(function (form) {
         form.addEventListener('submit', function (ev) {
           if (form.dataset._confirming === '1') return; // our own requestSubmit
+          if (form.hasAttribute('data-async')) return; // async.js owns confirm+fetch
           ev.preventDefault();
           window.svsConfirm(form.getAttribute('data-confirm')).then(function (ok) {
             if (ok) {
@@ -210,6 +211,11 @@
       });
     })();
   </script>
+
+  <!-- Generic async form handler + toast (§16.1). Loaded after the confirm
+       script so svsConfirm is available; it owns form[data-async]. -->
+  <script src="{{ url_for('static', filename='js/async.js') }}?v={{ static_version }}"></script>
+  <div id="svs-toasts" aria-live="polite"></div>
 
   <!-- Live room cover crop dialog (Cropper.js, mirrors the video cover flow §13.21).
        Shared by every page carrying .liveroom-cover-btn / .liveroom-cover-input

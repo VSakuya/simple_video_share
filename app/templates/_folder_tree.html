@@ -1,0 +1,41 @@
+{% macro folder_li(f) %}
+<li>
+  <div class="folder-tree__row">
+    <form method="post" action="{{ url_for('user.rename_folder', folder_id=f['id']) }}"
+          class="folder-rename" data-async data-async-refetch="#folder-tree"
+          data-async-refetch-url="{{ url_for('user.folder_tree') }}">
+      <input type="text" name="name" value="{{ f['name'] }}" required>
+      <button type="submit" class="btn btn--ghost btn--sm">Rename</button>
+    </form>
+    <form method="post" action="{{ url_for('user.delete_folder', folder_id=f['id']) }}"
+          data-confirm="Delete folder '{{ f['name'] }}'? Its videos move to Root."
+          data-async data-async-refetch="#folder-tree"
+          data-async-refetch-url="{{ url_for('user.folder_tree') }}">
+      <button type="submit" class="btn btn--danger btn--sm">Delete</button>
+    </form>
+    <form method="post" action="{{ url_for('user.create_folder') }}" class="folder-add-sub"
+          data-async data-async-refetch="#folder-tree"
+          data-async-refetch-url="{{ url_for('user.folder_tree') }}">
+      <input type="hidden" name="parent_id" value="{{ f['id'] }}">
+      <input type="text" name="name" placeholder="Subfolder" required>
+      <button type="submit" class="btn btn--ghost btn--sm">+ Sub</button>
+    </form>
+  </div>
+  {% if f['children'] %}
+  <ul>
+    {% for child in f['children'] %}
+    {{ folder_li(child) }}
+    {% endfor %}
+  </ul>
+  {% endif %}
+</li>
+{% endmacro %}
+{% if folders %}
+<ul class="folder-tree">
+  {% for f in folders %}
+  {{ folder_li(f) }}
+  {% endfor %}
+</ul>
+{% else %}
+<p class="muted">No folders.</p>
+{% endif %}

@@ -28,6 +28,29 @@
     | Drive: unknown
   {% endif %}
 </p>
+<div class="home-toolbar" id="home-toolbar">
+  <div class="field home-toolbar__search">
+    <input id="home-search" type="search" placeholder="Search by title…"
+           aria-label="Search by title">
+  </div>
+  <div class="field">
+    <label class="home-toolbar__label" for="home-owner">Uploader</label>
+    <select id="home-owner">
+      <option value="">All</option>
+      {% for owner in videos | map(attribute='owner_name') | unique | sort %}
+      <option value="{{ owner }}">{{ owner }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="field">
+    <label class="home-toolbar__label" for="home-sort">Sort</label>
+    <select id="home-sort">
+      <option value="newest" selected>Newest</option>
+      <option value="oldest">Oldest</option>
+      <option value="most_views">Most views</option>
+    </select>
+  </div>
+</div>
 <div class="waterfall" id="waterfall">
   {% for sf in subfolders %}
   <a class="card folder-card" href="{{ url_for('home.folder', folder_id=sf['id']) }}">
@@ -38,7 +61,24 @@
   </a>
   {% endfor %}
   {% for video in videos %}
-  <a class="card" href="{{ url_for('watch.page', video_id=video['id']) }}">
+  <a class="card card--video" href="{{ url_for('watch.page', video_id=video['id']) }}"
+     data-title="{{ video['title'] }}"
+     data-owner="{{ video['owner_name'] }}"
+     data-uploaded-at="{{ video['uploaded_at'] if video['uploaded_at'] else '' }}"
+     data-views="{{ video['view_count'] if video['view_count'] is not none else 0 }}"
+     data-pinned="{{ 1 if video['is_pinned'] else 0 }}">
+    {% if video['is_pinned'] %}
+    <span class="card__pin">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 0-1-1 2 2 0 0 1-2-2 1 1 0 0 0-2 0 2 2 0 0 1-2 2 1 1 0 0 0-1 1z"/></svg>
+      Pinned
+    </span>
+    {% endif %}
+    {% if not video['is_cached'] %}
+    <span class="card__remote">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9z"/></svg>
+      Remote
+    </span>
+    {% endif %}
     <img class="card__cover"
          src="{{ url_for('home.cover', filename=video['cover_filename']) if video['cover_filename'] else url_for('static', filename='img/placeholder.svg') }}"
          alt="{{ video['title'] }}" loading="lazy" decoding="async"
@@ -71,6 +111,49 @@
         d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) +
         " " + pad(d.getHours()) + ":" + pad(d.getMinutes());
     });
+  })();
+</script>
+<script>
+  // Home filter/sort (§16.4): search by title, filter by uploader, sort by
+  // date or view count. Pinned videos always sort first. Folders are never
+  // filtered or sorted — only the .card--video cells are re-appended/hidden.
+  (function () {
+    var waterfall = document.getElementById('waterfall');
+    var search = document.getElementById('home-search');
+    var ownerSel = document.getElementById('home-owner');
+    var sortSel = document.getElementById('home-sort');
+    if (!waterfall) return;
+    var cards = Array.prototype.slice.call(waterfall.querySelectorAll('.card--video'));
+
+    function apply() {
+      var q = (search.value || '').trim().toLowerCase();
+      var owner = ownerSel.value;
+      // 1) Filter: hide non-matching video cards (folders stay untouched).
+      cards.forEach(function (card) {
+        var matchTitle = !q || (card.getAttribute('data-title') || '').toLowerCase().indexOf(q) !== -1;
+        var matchOwner = !owner || card.getAttribute('data-owner') === owner;
+        card.hidden = !(matchTitle && matchOwner);
+      });
+      // 2) Sort: pinned first, then by the chosen order. Re-append visible cards.
+      var sorted = cards.filter(function (c) { return !c.hidden; }).sort(function (a, b) {
+        var ap = a.getAttribute('data-pinned') ? 1 : 0;
+        var bp = b.getAttribute('data-pinned') ? 1 : 0;
+        if (ap !== bp) return bp - ap; // pinned first
+        if (sortSel.value === 'most_views') {
+          return (parseInt(b.getAttribute('data-views'), 10) || 0) -
+                 (parseInt(a.getAttribute('data-views'), 10) || 0);
+        }
+        var at = a.getAttribute('data-uploaded-at') || '';
+        var bt = b.getAttribute('data-uploaded-at') || '';
+        // Newest = descending; oldest = ascending (ISO-ish strings compare fine).
+        return sortSel.value === 'oldest' ? at.localeCompare(bt) : bt.localeCompare(at);
+      });
+      sorted.forEach(function (card) { waterfall.appendChild(card); });
+    }
+
+    if (search) search.addEventListener('input', apply);
+    if (ownerSel) ownerSel.addEventListener('change', apply);
+    if (sortSel) sortSel.addEventListener('change', apply);
   })();
 </script>
 {% endblock %}

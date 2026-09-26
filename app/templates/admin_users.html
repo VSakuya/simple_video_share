@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Users — Simple Video Share{% endblock %}
+{% block content %}
+<div class="page">
+  <h1>Admin — Users</h1>
+  {% include "_admin_nav.html" %}
+  <section class="panel">
+    <h2>Create user</h2>
+    <form id="create-user-form" method="post" action="{{ url_for('admin.create_user') }}"
+          data-async data-async-add="#users-tbody">
+      <div class="settings-grid">
+        <div class="field">
+          <label for="new-username">Username</label>
+          <input id="new-username" type="text" name="username" required>
+        </div>
+        <div class="field">
+          <label for="new-password">Password</label>
+          <input id="new-password" type="password" name="password" required minlength="6">
+        </div>
+        <div class="field field--check">
+          <label><input type="checkbox" name="is_admin"> Admin</label>
+        </div>
+      </div>
+      <button type="submit" class="btn">Create user</button>
+    </form>
+  </section>
+  <section class="panel">
+    <h2>All users</h2>
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr><th>Username</th><th class="row-actions">Actions</th></tr>
+        </thead>
+        <tbody id="users-tbody">
+          {% for u in users %}
+          {% include "_user_row.html" %}
+          {% else %}
+          <tr><td colspan="2" class="muted">No users.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+{% endblock %}

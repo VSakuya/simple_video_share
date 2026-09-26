@@ -50,15 +50,21 @@ def retry_video(video_id: int) -> Any:
     assert me is not None
     video = db.get_video_by_id(video_id)
     if video is None:
+        if _is_ajax():
+            return jsonify(ok=False, error="Video not found."), 400
         flash("Video not found.", "error")
         return redirect(url_for("user.index"))
     if video["owner_id"] != me["id"] and not me.get("is_admin"):
+        if _is_ajax():
+            return jsonify(ok=False, error="You can only retry your own videos."), 400
         flash("You can only retry your own videos.", "error")
         return redirect(url_for("user.index"))
     local = video.get("local_filename")
     videos_dir = current_app.config["VIDEOS_DIR"]
     local_path = os.path.join(str(videos_dir), local) if local else ""
     if not local_path or not os.path.exists(local_path):
+        if _is_ajax():
+            return jsonify(ok=False, error="No local copy to upload — this video cannot be retried."), 400
         flash("No local copy to upload — this video cannot be retried.", "error")
         return redirect(url_for("user.index"))
     drive_filename = drive.make_drive_filename(video["title"], int(video["size_bytes"] or 0))
@@ -76,6 +82,8 @@ def retry_video(video_id: int) -> Any:
         current_app.config,
         resumable_uri=video.get("drive_resumable_uri"),
     )
+    if _is_ajax():
+        return jsonify(ok=True, message=f"Retrying upload for '{video['title']}'.", video_id=video_id)
     flash(f"Retrying upload for '{video['title']}'.", "success")
     return redirect(url_for("user.index"))
 
@@ -88,13 +96,19 @@ def delete_video(video_id: int) -> Any:
     assert me is not None
     video = db.get_video_by_id(video_id)
     if video is None:
+        if _is_ajax():
+            return jsonify(ok=False, error="Video not found."), 400
         flash("Video not found.", "error")
         return redirect(url_for("user.index"))
     if video["owner_id"] != me["id"] and not me.get("is_admin"):
+        if _is_ajax():
+            return jsonify(ok=False, error="You can only delete your own videos."), 400
         flash("You can only delete your own videos.", "error")
         return redirect(url_for("user.index"))
     _purge_video_files(video)
     db.delete_video(video_id)
+    if _is_ajax():
+        return jsonify(ok=True, message="Video deleted.", video_id=video_id)
     flash("Video deleted.", "success")
     return redirect(url_for("user.index"))
 
@@ -168,6 +182,18 @@ def create_folder() -> Any:
     return redirect(url_for("user.index"))
 
 
+@user_bp.route("/folders/tree")
+@login_required
+def folder_tree() -> str:
+    """Render the folder tree HTML (§16.1) so folder ops can swap it without a reload.
+
+    The client targets this with ``data-async-refetch`` on the folder forms.
+    """
+    me = current_user()
+    folders = db.folders_tree(me["id"]) if me else []
+    return render_template("_folder_tree.html", folders=folders)
+
+
 @user_bp.route("/folders/<int:folder_id>/rename", methods=["POST"])
 @login_required
 def rename_folder(folder_id: int) -> Any:
@@ -175,16 +201,24 @@ def rename_folder(folder_id: int) -> Any:
     assert me is not None
     folder = db.get_folder(folder_id)
     if folder is None:
+        if _is_ajax():
+            return jsonify(ok=False, error="Folder not found."), 400
         flash("Folder not found.", "error")
         return redirect(url_for("user.index"))
     if folder["owner_id"] != me["id"] and not me.get("is_admin"):
+        if _is_ajax():
+            return jsonify(ok=False, error="You can only rename your own folders."), 400
         flash("You can only rename your own folders.", "error")
         return redirect(url_for("user.index"))
     name = (request.form.get("name") or "").strip()
     if not name:
+        if _is_ajax():
+            return jsonify(ok=False, error="Folder name is required."), 400
         flash("Folder name is required.", "error")
         return redirect(url_for("user.index"))
     db.rename_folder(folder_id, name)
+    if _is_ajax():
+        return jsonify(ok=True, message="Folder renamed.", folder_id=folder_id)
     flash("Folder renamed.", "success")
     return redirect(url_for("user.index"))
 
@@ -196,13 +230,19 @@ def delete_folder(folder_id: int) -> Any:
     assert me is not None
     folder = db.get_folder(folder_id)
     if folder is None:
+        if _is_ajax():
+            return jsonify(ok=False, error="Folder not found."), 400
         flash("Folder not found.", "error")
         return redirect(url_for("user.index"))
     if folder["owner_id"] != me["id"] and not me.get("is_admin"):
+        if _is_ajax():
+            return jsonify(ok=False, error="You can only delete your own folders."), 400
         flash("You can only delete your own folders.", "error")
         return redirect(url_for("user.index"))
     # The FK's ON DELETE SET NULL sends the folder's videos back to Root.
     db.delete_folder(folder_id)
+    if _is_ajax():
+        return jsonify(ok=True, message="Folder deleted (its videos moved to Root).", folder_id=folder_id)
     flash("Folder deleted (its videos moved to Root).", "success")
     return redirect(url_for("user.index"))
 

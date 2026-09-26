@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Settings — Simple Video Share{% endblock %}
+{% block content %}
+<div class="page">
+  <h1>Admin — Settings</h1>
+  {% include "_admin_nav.html" %}
+  <section class="panel">
+    <h2>Settings</h2>
+    <form id="settings-form" method="post" action="{{ url_for('admin.save_settings') }}" data-async>
+      <div class="settings-grid">
+        <div class="field">
+          <label for="setting-default-bitrate">Default bitrate (kbps)</label>
+          <input id="setting-default-bitrate" type="number" name="default_bitrate" value="{{ settings.get('default_bitrate', '5000') }}">
+        </div>
+        <div class="field">
+          <label for="setting-default-codec">Default codec</label>
+          <select id="setting-default-codec" name="default_codec">
+            <option value="av1" {{ 'selected' if settings.get('default_codec', 'av1') == 'av1' else '' }}>AV1</option>
+            <option value="h264" {{ 'selected' if settings.get('default_codec', 'av1') == 'h264' else '' }}>H.264</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="setting-fallback-codec">Fallback codec</label>
+          <select id="setting-fallback-codec" name="fallback_codec">
+            <option value="h264" {{ 'selected' if settings.get('fallback_codec', 'h264') == 'h264' else '' }}>H.264</option>
+            <option value="av1" {{ 'selected' if settings.get('fallback_codec', 'h264') == 'av1' else '' }}>AV1</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="setting-max-resolution">Max resolution</label>
+          <input id="setting-max-resolution" type="number" name="max_resolution" value="{{ settings.get('max_resolution', '1080') }}">
+        </div>
+        <div class="field">
+          <label for="setting-max-fps">Max FPS</label>
+          <input id="setting-max-fps" type="number" name="max_fps" value="{{ settings.get('max_fps', '60') }}">
+        </div>
+        <div class="field">
+          <label for="setting-min-free-space">Min free space (MB)</label>
+          <input id="setting-min-free-space" type="number" name="min_free_space_bytes" value="{{ (settings.get('min_free_space_bytes', '524288000') | int) // 1048576 }}">
+        </div>
+        <div class="field">
+          <label for="setting-max-cache">Max cache (MB)</label>
+          <input id="setting-max-cache" type="number" name="max_cache_mb" value="{{ settings.get('max_cache_mb', '0') }}">
+          <span class="hint">Total size of locally cached videos; 0 = unlimited. When exceeded, the oldest cached videos that already have a Google Drive copy are deleted. Videos still uploading to Drive are kept.</span>
+        </div>
+      </div>
+      <p class="muted">
+        Cached videos: {{ cached_bytes | human_size }}
+        {% if cache_cap_bytes > 0 %} / cap {{ cache_cap_bytes | human_size }}{% else %} (no cap){% endif %}
+        <br>Disk free: {{ disk_free_bytes | human_size }}
+        <br>Drive free: {% if drive_free_bytes is not none %}{{ drive_free_bytes | human_size }}{% else %}unknown{% endif %}
+      </p>
+      <button type="submit" class="btn">Save settings</button>
+    </form>
+  </section>
+</div>
+{% endblock %}

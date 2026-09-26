@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Live rooms — Simple Video Share{% endblock %}
+{% block content %}
+<div class="page">
+  <h1>Admin — Live rooms</h1>
+  {% include "_admin_nav.html" %}
+  <section class="panel">
+    <h2>Live rooms</h2>
+    <p class="muted">Live rooms are created by users on their own account page. Here you can only delete them.</p>
+    <div class="live-room-list">
+      {% for room in live_rooms %}
+      <div class="live-room-card">
+        <img class="live-room-card__cover"
+             src="{{ url_for('home.cover', filename=room['cover_filename']) if room['cover_filename'] else url_for('static', filename='img/placeholder.svg') }}"
+             alt="{{ room['title'] }}">
+        <div class="live-room-card__title">{{ room['title'] }}</div>
+        <div class="live-room-card__owner">{{ room['owner_username'] }}</div>
+        <form method="post" action="{{ url_for('admin.delete_live_room', room_id=room['id']) }}"
+              data-async data-async-remove=".live-room-card" data-confirm="Delete this live room?">
+          <button type="submit" class="btn btn--danger btn--sm">Delete</button>
+        </form>
+      </div>
+      {% else %}
+      <p class="muted">No live rooms.</p>
+      {% endfor %}
+    </div>
+  </section>
+</div>
+{% endblock %}

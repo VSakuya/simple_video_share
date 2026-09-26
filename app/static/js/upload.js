@@ -24,6 +24,7 @@ const queueList = $("queue-list");
 const queueCount = $("queue-count");
 const fileLabel = $("file-label");
 const maxFpsInput = $("max-fps-input");
+const maxBitrateInput = $("max-bitrate-input");
 const folderSelect = $("folder-select");
 const folderNewName = $("folder-new-name");
 const folderInput = $("folder-input");
@@ -63,6 +64,17 @@ function getMaxFps() {
   const n = maxFpsInput ? parseInt(maxFpsInput.value, 10) : NaN;
   if (!Number.isFinite(n) || n <= 0) return 60;
   return Math.min(60, n);
+}
+
+// Per-upload bitrate cap (kbps) the user picks in the form, clamped to the
+// admin max (SVS_MAX_BITRATE_KBPS). Read live so it can change any time before
+// the queue starts. Persisted to localStorage and restored on page load.
+function getMaxBitrate() {
+  const max = (typeof window.SVS_MAX_BITRATE_KBPS === "number" && window.SVS_MAX_BITRATE_KBPS > 0)
+    ? window.SVS_MAX_BITRATE_KBPS : 5000;
+  const n = maxBitrateInput ? parseInt(maxBitrateInput.value, 10) : NaN;
+  if (!Number.isFinite(n) || n <= 0) return max;
+  return Math.min(max, n);
 }
 
 // --- Queue state ---
@@ -158,7 +170,7 @@ async function processOne(item) {
   const probe = await probeVideo(item.file, ctx);
 
   setItemStatus(item, "Transcoding…");
-  const { blob, info } = await processVideo(item.file, { probe, clip: null, maxFps: getMaxFps() }, ctx);
+  const { blob, info } = await processVideo(item.file, { probe, clip: null, maxFps: getMaxFps(), maxBitrateKbps: getMaxBitrate() }, ctx);
 
   // Re-probe the file actually uploaded (transcoded, or the source on direct
   // pass) so stored metadata reflects THAT file, not the original source.
@@ -249,6 +261,18 @@ dropZone.addEventListener("drop", (e) => {
 folderSelect.addEventListener("change", () => {
   folderNewName.classList.toggle("hidden", folderSelect.value !== "__new__");
 });
+if (maxBitrateInput) {
+  // Restore the user's saved bitrate cap (clamped to the current admin max).
+  try {
+    const saved = parseInt(localStorage.getItem("svs-max-bitrate"), 10);
+    const max = (typeof window.SVS_MAX_BITRATE_KBPS === "number" && window.SVS_MAX_BITRATE_KBPS > 0)
+      ? window.SVS_MAX_BITRATE_KBPS : 5000;
+    if (Number.isFinite(saved) && saved > 0) maxBitrateInput.value = Math.min(max, saved);
+  } catch (e) { /* localStorage unavailable (e.g. private mode) */ }
+  maxBitrateInput.addEventListener("change", () => {
+    try { localStorage.setItem("svs-max-bitrate", maxBitrateInput.value); } catch (e) { /* ignore */ }
+  });
+}
 startBtn.addEventListener("click", () => { void startQueue(); });
 window.addEventListener("beforeunload", () => cancelActiveTranscode());
 

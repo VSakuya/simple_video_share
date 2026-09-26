@@ -35,6 +35,13 @@
     <input type="number" id="max-fps-input" class="upload-input upload-input--narrow" min="1" max="60" step="1" value="60">
   </div>
 
+  <!-- Max bitrate cap for the transcode (never exceeds the admin max; remembered
+       per device via localStorage and reloaded on every visit). -->
+  <div class="upload-section">
+    <label for="max-bitrate-input" class="upload-label">Max bitrate (kbps) <span class="muted">(transcode cap; &le; admin max, remembered on this device)</span></label>
+    <input type="number" id="max-bitrate-input" class="upload-input upload-input--narrow" min="100" max="{{ max_bitrate_kbps }}" step="100" value="{{ max_bitrate_kbps }}">
+  </div>
+
   <!-- Folder: choose an existing one, or create a new one (applies to the whole queue) -->
   <div class="upload-section">
     <label for="folder-select" class="upload-label">Folder <span class="muted">(optional)</span></label>

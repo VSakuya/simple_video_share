@@ -248,6 +248,14 @@ function probeWithHtml5(file) {
 // source probe (the caller re-probes the output for stored metadata).
 export async function processVideo(file, opts, ctx) {
   const log = ctx.log;
+  // The effective bitrate cap: the page's custom cap (opts.maxBitrateKbps),
+  // clamped to the admin hard maximum. Falls back to the admin max when the
+  // page supplies no custom cap (e.g. the clip editor).
+  const capBitrate = Math.min(
+    (Number.isFinite(opts.maxBitrateKbps) && opts.maxBitrateKbps > 0)
+      ? opts.maxBitrateKbps : MAX_BITRATE_KBPS,
+    MAX_BITRATE_KBPS
+  );
   // Direct pass is legitimate ONLY when there is no clip and every cap is
   // already met. In that case the original file is compliant and is uploaded
   // unchanged.
@@ -256,12 +264,12 @@ export async function processVideo(file, opts, ctx) {
   if (!probe) needs = true; // unknown caps -> transcode to be safe
   else if (probe.height > MAX_HEIGHT) needs = true;
   else if (probe.fps > opts.maxFps) needs = true;
-  else if (probe.bitrateKbps > MAX_BITRATE_KBPS) needs = true;
+  else if (probe.bitrateKbps > capBitrate) needs = true;
 
   if (!needs) {
     log(
       "info",
-      "Direct pass - no clip and all caps met (height<=" + MAX_HEIGHT + ", fps<=" + opts.maxFps + ", bitrate<=" + MAX_BITRATE_KBPS + " kbps); uploading the original file unchanged."
+      "Direct pass - no clip and all caps met (height<=" + MAX_HEIGHT + ", fps<=" + opts.maxFps + ", bitrate<=" + capBitrate + " kbps); uploading the original file unchanged."
     );
     return { blob: file, info: probe };
   }
@@ -270,14 +278,14 @@ export async function processVideo(file, opts, ctx) {
   const capHeight = probe ? (probe.height > MAX_HEIGHT ? MAX_HEIGHT : 0) : MAX_HEIGHT;
   const capFps = probe && probe.fps > opts.maxFps ? opts.maxFps : 0;
   const bitrateKbps = Math.min(
-    probe ? probe.bitrateKbps || MAX_BITRATE_KBPS : MAX_BITRATE_KBPS,
-    MAX_BITRATE_KBPS
+    probe ? probe.bitrateKbps || capBitrate : capBitrate,
+    capBitrate
   );
   log(
     "info",
     "Transcode required (clip=" +
       (clip ? clip.start + "-" + clip.end + "s" : "none") +
-      "; caps: height<=1080, fps<=60, bitrate<=" + MAX_BITRATE_KBPS + " kbps)."
+      "; caps: height<=1080, fps<=60, bitrate<=" + capBitrate + " kbps)."
   );
 
   // Stage 1 - mediabunny (WebCodecs, hardware accelerated), AV1 then H.264.
