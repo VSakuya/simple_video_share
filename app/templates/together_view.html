@@ -10,7 +10,7 @@
   <div class="together-player">
     <div class="player-wrap" id="together-player-wrap">
       <div id="dplayer"></div>
-      <div class="together-waiting" id="togetherWaiting" hidden>等待 <span id="togetherWaitingName"></span> 中…</div>
+      <div class="together-waiting" id="togetherWaiting" hidden></div>
     </div>
   </div>
   <div class="together-side">
@@ -71,6 +71,9 @@
   var suppressPlay = false;
   var suppressPause = false;
   var suppressSeek = false;
+  // The last seek_seq we acted on. A tick carrying a new value is a real seek
+  // we must hard-seek to (self-healing, §17.4); null until the first state.
+  var lastSeekSeq = null;
 
   var feed = document.getElementById('together-feed');
   var onlineEl = document.getElementById('online-count');
@@ -152,16 +155,17 @@
     feed.appendChild(el);
     feed.scrollTop = feed.scrollHeight;
   }
-  // Reconcile our playback with the shared pace (§17.4). On an explicit seek
-  // (doSeek) we hard-seek to target_t; otherwise we pause locally when the
-  // group is paused or when we are the fast one more than SYNC_TOLERANCE ahead
-  // of the slowest viewer, and play otherwise (no hard seek for drift).
-  function applyState(p, targetT, slowest, doSeek, pausedBy) {
+  // Reconcile our playback with the shared pace (§17.4). When ``seekTarget`` is
+  // a number (a fresh join to the pace, or a new seek_seq) we hard-seek to it;
+  // otherwise we pause locally when the group is paused or when we are the fast
+  // one more than SYNC_TOLERANCE ahead of the slowest viewer, and play
+  // otherwise (no hard seek for drift).
+  function applyState(p, targetT, slowest, pausedBy, seekTarget) {
     playing = p;
-    if (!videoEl || typeof targetT !== 'number') return;
-    if (doSeek) {
+    if (!videoEl) return;
+    if (typeof seekTarget === 'number') {
       suppressSeek = true;
-      videoEl.currentTime = targetT;
+      videoEl.currentTime = seekTarget;
       if (playing && videoEl.paused) {
         suppressPlay = true;
         videoEl.play().catch(function(){});
@@ -169,41 +173,37 @@
         suppressPause = true;
         videoEl.pause();
       }
-      setWaiting(false);
+      setWaiting('');
       return;
     }
+    if (typeof targetT !== 'number') return;
     var tooFast = playing && (videoEl.currentTime - targetT) > SYNC_TOLERANCE;
     if (!playing || tooFast) {
       if (!videoEl.paused) {
         suppressPause = true;
         videoEl.pause();
       }
-      // When the group is paused, wait for the person who paused; when we are
-      // simply ahead of the pace, wait for the slowest viewer.
+      // When the group is paused, name who paused; when we are simply ahead of
+      // the pace, wait for the slowest viewer.
       if (!playing) {
-        setWaiting(true, pausedBy);
+        setWaiting(pausedBy ? pausedBy + ' paused' : '');
       } else {
-        setWaiting(true, slowest);
+        setWaiting(slowest ? 'Waiting for ' + slowest : '');
       }
     } else {
       if (videoEl.paused) {
         suppressPlay = true;
         videoEl.play().catch(function(){});
       }
-      setWaiting(false);
+      setWaiting('');
     }
   }
 
-  function setWaiting(show, name) {
+  function setWaiting(message) {
     var el = document.getElementById('togetherWaiting');
     if (!el) return;
-    if (show && name) {
-      var n = document.getElementById('togetherWaitingName');
-      if (n) n.textContent = name;
-      el.hidden = false;
-    } else {
-      el.hidden = true;
-    }
+    el.textContent = message || '';
+    el.hidden = !message;
   }
 
   // --- SSE connection ---
@@ -215,13 +215,22 @@
       members = (d.members || []).slice();
       renderMembers();
       if (typeof d.playing !== 'undefined') {
-        // Fresh join: hard-seek to the current pace.
-        applyState(d.playing, d.target_t, d.slowest, true);
+        // Fresh join: adopt the current seek_seq and hard-seek to the pace.
+        lastSeekSeq = d.seek_seq;
+        applyState(d.playing, d.target_t, d.slowest, d.paused_by, d.target_t);
       }
     } else if (d.type === 'time') {
-      applyState(d.playing, d.target_t, d.slowest, !!d.seek, d.paused_by);
+      // A tick carrying a new seek_seq is a seek we must hard-seek to; the
+      // self-healing design re-asserts it every tick until we catch up (§17.4).
+      var newSeek = typeof d.seek_seq === 'number' && d.seek_seq !== lastSeekSeq;
+      if (newSeek) {
+        lastSeekSeq = d.seek_seq;
+        applyState(d.playing, d.target_t, d.slowest, d.paused_by, d.seek_t);
+      } else {
+        applyState(d.playing, d.target_t, d.slowest, d.paused_by, null);
+      }
       if (d.actor) {
-        var verb = d.action === 'seek' ? '跳转了' : d.action === 'pause' ? '暂停了' : '播放了';
+        var verb = d.action === 'seek' ? 'seeked' : d.action === 'pause' ? 'paused' : 'resumed';
         appendNotice(d.actor + ' ' + verb);
       }
     } else if (d.type === 'join') {

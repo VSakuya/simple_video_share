@@ -1617,8 +1617,9 @@ button:disabled { opacity: 0.55; cursor: not-allowed; filter: none; }
 .together-page { display: grid; grid-template-columns: minmax(0, 1fr) 24rem; gap: 12px; }
 .together-player { min-width: 0; }
 .together-player .player-wrap { margin-bottom: 0; }
-/* Waiting overlay: shown when we are the fast one more than 1 s ahead of the
-   slowest viewer (§17.4). Covers the player; the name is injected by JS. */
+/* Waiting overlay: shown when the group is paused ("XXX paused") or when we are
+   the fast one more than 1 s ahead of the slowest viewer ("Waiting for XXX",
+   §17.4). Covers the player; the message text is set by JS. */
 .together-waiting {
   position: absolute; inset: 0;
   display: flex; align-items: center; justify-content: center;

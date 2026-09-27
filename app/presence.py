@@ -70,9 +70,12 @@ class _Room:
         # Watch-together fields (§17); live rooms leave these at their defaults.
         self.video_id: int = 0
         self.title: str = ""
-        # Slowest-viewer pacing (§17.4). ``play_state`` carries only ``playing``
-        # and the current pace ``target_t`` (the slowest fresh position); the
-        # per-member positions that derive the pace live in ``positions``.
+        # Slowest-viewer pacing (§17.4). ``play_state`` carries ``playing``,
+        # the current pace ``target_t`` (the slowest fresh position), who paused
+        # it (``paused_by``), and the last seek (``seek_seq``/``seek_t``) so a
+        # client that missed the one-shot seek broadcast hard-seeks on the next
+        # tick. The per-member positions that derive the pace live in
+        # ``positions``.
         self.play_state: dict[str, Any] | None = None
         # user_id -> {"t": float, "at": float, "username": str}; the last
         # reported playback position (seconds) and its wall-clock timestamp.
@@ -139,7 +142,8 @@ def stream(key: str, me: dict[str, Any]) -> Generator[str, None, None]:
     room's recent chat history (the
     messages kept in the ring buffer, L62), then any ``join``/``leave``/
     ``message`` events. For watch rooms the state payload also includes
-    ``playing``, ``target_t``, and ``slowest`` (§17.4). ``join``/``leave``
+    ``playing``, ``target_t``, ``paused_by``, ``seek_t``, and ``seek_seq``
+    (§17.4). ``join``/``leave``
     events carry the updated online count so clients stay in sync (L61), with
     a ``: hb`` comment every ``HEARTBEAT_SECONDS`` of silence.
 
@@ -186,6 +190,8 @@ def stream(key: str, me: dict[str, Any]) -> Generator[str, None, None]:
                 pace[0] if pace[0] is not None else play_state["target_t"]
             )
             state_payload["paused_by"] = play_state.get("paused_by")
+            state_payload["seek_t"] = play_state.get("seek_t", 0.0)
+            state_payload["seek_seq"] = play_state.get("seek_seq", 0)
             if pace[1] is not None:
                 state_payload["slowest"] = pace[1]
         yield _sse(state_payload)
@@ -250,6 +256,8 @@ def init_watch_state(key: str, video_id: int, title: str) -> None:
                 "playing": True,
                 "target_t": 0.0,
                 "paused_by": None,
+                "seek_seq": 0,
+                "seek_t": 0.0,
             }
 
 
@@ -263,13 +271,14 @@ def set_watch_state(
 
     ``action`` is ``"play"``, ``"pause"``, or ``"seek"``. For ``"seek"``, ``t``
     is the new video position in seconds — every member's reported position is
-    reset to it so the group stays together after the seek. When ``actor`` is
-    given and the action actually changes the shared state, the payload also
-    carries ``actor`` + ``action`` so clients can show a "XXX 暂停了 / 跳转了 /
-    播放了" notice. A pause also records ``paused_by`` (the username) in the
-    play state so every client can show a "等待 XXX 中…" overlay while the
-    group is stopped; playback clears it. Returns the updated play state dict,
-    or ``None`` if the room does not exist.
+    reset to it so the group stays together, ``seek_t`` is set to ``t``, and
+    ``seek_seq`` is bumped so a client that missed this one-shot broadcast
+    hard-seeks to ``seek_t`` on the next tick. When ``actor`` is given and the
+    action actually changes the shared state, the payload also carries ``actor``
+    + ``action`` so clients can show a "XXX paused / seeked / resumed" notice. A
+    pause records ``paused_by`` (the username) in the play state so every client
+    can show an "XXX paused" overlay while the group is stopped; playback clears
+    it. Returns the updated play state dict, or ``None`` if the room is gone.
     """
     with _LOCK:
         room = _ROOMS.get(key)
@@ -293,6 +302,8 @@ def set_watch_state(
             for pos in room.positions.values():
                 pos["t"] = float(t)
             ps["target_t"] = float(t)
+            ps["seek_t"] = float(t)
+            ps["seek_seq"] = ps.get("seek_seq", 0) + 1
             seek = True
             changed = True
 
@@ -304,6 +315,8 @@ def set_watch_state(
             "playing": ps["playing"],
             "target_t": ps["target_t"],
             "paused_by": ps.get("paused_by"),
+            "seek_t": ps.get("seek_t", 0.0),
+            "seek_seq": ps.get("seek_seq", 0),
         }
         if seek:
             payload["seek"] = True
@@ -369,7 +382,9 @@ def _watch_tick_loop() -> None:
     """Background thread: broadcast ``time`` ticks to all active watch rooms.
 
     Each tick recomputes the shared pace (the slowest fresh position, §17.4)
-    and broadcasts it with ``target_t`` and ``slowest``.
+    and broadcasts it with ``target_t``, ``slowest``, ``seek_t``, and
+    ``seek_seq`` (the latter two let a client that missed the one-shot seek
+    broadcast hard-seek on the next tick).
     """
     while True:
         time.sleep(_WATCH_TICK_SECONDS)
@@ -390,6 +405,8 @@ def _watch_tick_loop() -> None:
                     "playing": ps["playing"],
                     "target_t": ps["target_t"],
                     "paused_by": ps.get("paused_by"),
+                    "seek_t": ps.get("seek_t", 0.0),
+                    "seek_seq": ps.get("seek_seq", 0),
                 }
                 if slowest is not None:
                     payload["slowest"] = slowest
