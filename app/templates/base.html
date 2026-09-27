@@ -27,6 +27,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='vendor/pico.min.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v={{ static_version }}">
   <title>{% block title %}Simple Video Share{% endblock %}</title>
+  <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/favicon.png') }}">
   <script>window.SVS_BASE = "{{ svs_base }}";</script>
   <script src="{{ url_for('static', filename='js/inpage.js') }}?v={{ static_version }}"></script>
   {% block head %}{% endblock %}
