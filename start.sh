@@ -5,7 +5,8 @@
 #   - Creates .venv and installs requirements if missing.
 #   - Seeds config.json / secret key on first run (handled by config.py).
 #   - Initialises the SQLite DB (handled by db.init_db() via create_app()).
-#   - Runs the app on the host/port from config.json.
+#   - Runs the app under Waitress (a production WSGI server) on the
+#     host/port from config.json.
 
 set -euo pipefail
 
@@ -15,7 +16,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 VENV_DIR="$SCRIPT_DIR/.venv"
-PYTHON="${PYTHON:-python3}"
+PYTHON="${PYTHON:-python3.10}"
 
 # 1. Create a virtual environment if it does not exist yet.
 if [ ! -d "$VENV_DIR" ]; then
@@ -33,6 +34,20 @@ if ! "$VENV_DIR/bin/pip" install -q -r requirements.txt; then
     exit 1
 fi
 
-# 3. Launch the app (host/port/secret come from config.json, auto-seeded).
-echo "Starting Simple Video Share ..."
-exec "$VENV_DIR/bin/python" main.py
+# 3. Launch the app under Waitress, a production WSGI server (host/port come
+#    from config.json, auto-seeded). Waitress is single-process, multi-threaded:
+#    every request — including the long-lived SSE streams — gets its own thread,
+#    so the in-memory room state in app/presence.py stays in one process while
+#    many connections are served concurrently. (A multi-process server such as
+#    `gunicorn -w N` would split that state across workers and break presence.)
+#    THREADS (env, default 50) must cover the expected number of simultaneous
+#    SSE connections plus a burst of normal requests.
+HOST="$("$VENV_DIR/bin/python" -c "import json; print(json.load(open('config.json')).get('host', '127.0.0.1'))")"
+PORT="$("$VENV_DIR/bin/python" -c "import json; print(json.load(open('config.json')).get('port', 8080))")"
+THREADS="${THREADS:-50}"
+echo "Starting Simple Video Share (Waitress) on ${HOST}:${PORT} (threads=${THREADS}) ..."
+exec "$VENV_DIR/bin/waitress-serve" \
+    --listen="${HOST}:${PORT}" \
+    --threads="${THREADS}" \
+    --ident="simple-video-share" \
+    wsgi:app
