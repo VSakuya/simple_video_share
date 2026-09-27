@@ -112,7 +112,6 @@ def presence_stream(video_id: int) -> Any:
     )
     resp.headers["Cache-Control"] = "no-cache, no-transform"
     resp.headers["X-Accel-Buffering"] = "no"
-    resp.headers["Connection"] = "keep-alive"
     return resp
 
 
