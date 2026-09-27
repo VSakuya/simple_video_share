@@ -55,6 +55,10 @@
          href="{{ url_for('live.index') }}" title="Live">
         <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M7.76 16.24a6 6 0 0 1 0-8.49"/><path d="M4.93 19.07a10 10 0 0 1 0-14.14"/></svg></span><span class="label">Live</span>
       </a>
+      <a class="sidebar__item{% if request.path.startswith('/together') %} is-active{% endif %}"
+         href="{{ url_for('together.index') }}" title="Watch Together">
+        <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span><span class="label">Watch Together</span>
+      </a>
       {% if session.user_id %}
       <a class="sidebar__item{% if request.path.startswith('/upload') %} is-active{% endif %}"
          href="{{ url_for('upload.index') }}" title="Upload">

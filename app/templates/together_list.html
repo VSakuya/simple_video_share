@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Watch Together — Simple Video Share{% endblock %}
+{% block content %}
+<h1>Watch Together</h1>
+<div class="waterfall" id="together-list">
+  {% for room in rooms %}
+  <a class="card together-card" href="{{ url_for('together.room', video_id=room['video_id']) }}">
+    <img class="card__cover"
+         src="{{ url_for('home.cover', filename=room['cover_filename']) if room['cover_filename'] else url_for('static', filename='img/placeholder.svg') }}"
+         alt="{{ room['title'] }}" loading="lazy" decoding="async"
+         onload="this.classList.add('is-loaded')">
+    <span class="together-badge">{{ room['online'] }} watching</span>
+    <div class="card__title">{{ room['title'] }}</div>
+  </a>
+  {% else %}
+  <p class="muted">No active watch rooms.</p>
+  {% endfor %}
+</div>
+{% endblock %}

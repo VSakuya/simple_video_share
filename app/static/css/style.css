@@ -1249,8 +1249,9 @@ button:disabled { opacity: 0.55; cursor: not-allowed; filter: none; }
   flex: 0 0 auto;
 }
 .video-author__name { font-size: 1.25rem; font-weight: 600; }
-/* Download button (§16.5): right-aligned in the uploader row. */
-.video-author__download { margin-left: auto; flex: 0 0 auto; }
+/* Watch Together + Download buttons (§17): right-aligned in the uploader row. */
+.video-author__together { margin-left: auto; flex: 0 0 auto; }
+.video-author__download { flex: 0 0 auto; }
 
 /* ===== Comments (watch page, §13.16) ===== */
 .comments {
@@ -1535,6 +1536,20 @@ button:disabled { opacity: 0.55; cursor: not-allowed; filter: none; }
 .live-side__header .live-view__description { margin: 8px 0 0; }
 .live-side__online { margin-top: 10px; font-size: 0.85rem; color: var(--muted); }
 .live-side__online strong { color: var(--text); font-weight: 700; }
+/* Room member avatar stack (§17.10): shown below the room title on the live
+   and watch-together sidebars. Avatars overlap; a "+N" chip caps the row and
+   shows how many more users are present. Shared by both pages. */
+.room-members { display: flex; align-items: center; min-height: 28px; margin: 10px 0 0; }
+.room-members__avatar {
+  width: 28px; height: 28px; border-radius: 50%; object-fit: cover; flex: 0 0 auto;
+  border: 2px solid var(--panel-2); margin-right: -8px; background: var(--panel-2);
+}
+.room-members__more {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: 50%; flex: 0 0 auto;
+  background: var(--panel); border: 2px solid var(--panel-2);
+  color: var(--muted); font-size: 0.65rem; font-weight: 700; margin-right: -8px;
+}
 .live-feed { flex: 1; min-height: 0; overflow-y: auto; padding: 10px 14px; display: flex; flex-direction: column; gap: 8px; }
 .live-feed__empty { color: var(--muted); font-size: 0.85rem; }
 .live-feed__notice { font-size: 0.8rem; color: var(--muted); }
@@ -1586,3 +1601,65 @@ button:disabled { opacity: 0.55; cursor: not-allowed; filter: none; }
    squeezed the input. Keep the button auto-sized so the input (flex:1) expands
    to fill the row. Applies on all viewports. */
 .live-composer button[type="submit"] { flex: 0 0 auto; width: auto; }
+
+/* ===== Watch Together (§17) ===== */
+/* List page: reuses the home/live card grid (.waterfall + .card). */
+.together-card { position: relative; }
+.together-badge {
+  position: absolute; top: 8px; right: 8px;
+  padding: 2px 8px; border-radius: 4px;
+  background: var(--accent); color: #fff;
+  font-size: 0.7rem; font-weight: 700;
+  pointer-events: none;
+}
+
+/* Room page: two-column grid mirroring .live-page (§16.8). */
+.together-page { display: grid; grid-template-columns: minmax(0, 1fr) 24rem; gap: 12px; }
+.together-player { min-width: 0; }
+.together-player .player-wrap { margin-bottom: 0; }
+/* Waiting overlay: shown when we are the fast one more than 1 s ahead of the
+   slowest viewer (§17.4). Covers the player; the name is injected by JS. */
+.together-waiting {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff; font-size: 1.1rem; font-weight: 600;
+  pointer-events: none; z-index: 10;
+}
+.together-waiting[hidden] { display: none; }
+.together-side {
+  position: relative;
+  min-height: 0;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.together-side__inner { position: absolute; inset: 0; display: flex; flex-direction: column; }
+.together-side__header { padding: 12px 14px 10px; border-bottom: 1px solid var(--border); }
+.together-side__title { font-size: 1.05rem; font-weight: 700; line-height: 1.3; margin: 0 0 10px; overflow-wrap: anywhere; }
+.together-side__online { margin-top: 10px; font-size: 0.85rem; color: var(--muted); }
+.together-side__online strong { color: var(--text); font-weight: 700; }
+.together-feed { flex: 1; min-height: 0; overflow-y: auto; padding: 10px 14px; display: flex; flex-direction: column; gap: 8px; }
+.together-feed__empty { color: var(--muted); font-size: 0.85rem; }
+.together-feed__notice { font-size: 0.8rem; color: var(--muted); }
+.together-feed__msg { display: flex; align-items: flex-start; gap: 8px; }
+.together-feed__avatar { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; flex: 0 0 auto; }
+.together-feed__body { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
+.together-feed__name { font-size: 0.75rem; font-weight: 600; color: var(--muted); }
+.together-feed__text { font-size: 0.9rem; line-height: 1.45; overflow-wrap: anywhere; white-space: pre-wrap; }
+.together-composer { display: flex; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--border); }
+.together-composer__input { flex: 1; min-width: 0; }
+.together-composer button { flex: 0 0 auto; }
+.together-composer button[type="submit"] { flex: 0 0 auto; width: auto; }
+
+@media (max-width: 768px) {
+  .together-page { grid-template-columns: 1fr; }
+  .together-side { height: 70vh; }
+}
+
+/* Full-screen layout for the watch room page (mirrors §16.9 live rules). */
+@media (min-width: 769px) {
+  body.page--live .together-page { flex: 1 1 auto; min-height: 0; grid-template-rows: 1fr; }
+  body.page--live .together-player { min-height: 0; }
+}

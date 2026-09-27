@@ -235,6 +235,10 @@
        src="{{ url_for('home.avatar_file', filename=video['owner_avatar_filename']) if video['owner_avatar_filename'] else url_for('static', filename='img/avatar-default.svg') }}"
        alt="{{ video['owner_name'] }}">
   <span class="video-author__name">{{ video['owner_name'] }}</span>
+  {% if is_cached %}
+  <a class="btn video-author__together"
+     href="{{ url_for('together.room', video_id=video['id']) }}">Watch Together</a>
+  {% endif %}
   {% if video['local_filename'] %}
   <a class="btn video-author__download"
      href="{{ url_for('watch.download', video_id=video['id']) }}">Download</a>

@@ -110,6 +110,7 @@ def create_app() -> Flask:
     from .routes.live import live_bp
     from .routes.upload import upload_bp
     from .routes.watch import watch_bp
+    from .routes.together import together_bp
     from .routes.user import user_bp
     from .routes.admin import admin_bp
 
@@ -118,6 +119,7 @@ def create_app() -> Flask:
     app.register_blueprint(live_bp)
     app.register_blueprint(upload_bp)
     app.register_blueprint(watch_bp)
+    app.register_blueprint(together_bp)
     app.register_blueprint(user_bp)
     app.register_blueprint(admin_bp)
     app_logger.info("create_app: ready (%d blueprints registered)", len(app.blueprints))

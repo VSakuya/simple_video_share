@@ -1,0 +1,303 @@
+{% extends "base.html" %}
+{% block title %}{{ video['title'] }} — Watch Together{% endblock %}
+{% block body_class %}page--live{% endblock %}
+{% block head %}
+<!-- DPlayer (§13.39): single self-contained vendor JS. -->
+<script src="{{ url_for('static', filename='vendor/dplayer/DPlayer.min.js') }}?v={{ static_version }}"></script>
+{% endblock %}
+{% block content %}
+<div class="together-page">
+  <div class="together-player">
+    <div class="player-wrap" id="together-player-wrap">
+      <div id="dplayer"></div>
+      <div class="together-waiting" id="togetherWaiting" hidden>等待 <span id="togetherWaitingName"></span> 中…</div>
+    </div>
+  </div>
+  <div class="together-side">
+    <div class="together-side__inner">
+      <div class="together-side__header">
+        <div class="together-side__title">{{ video['title'] }}</div>
+        <div class="together-side__online">
+          <strong id="online-count">…</strong>&nbsp;watching
+        </div>
+        <div class="room-members" id="together-members"></div>
+      </div>
+      <div class="together-feed" id="together-feed">
+        <div class="together-feed__empty">No messages yet.</div>
+      </div>
+      <form class="together-composer" id="together-chat-form">
+        <input class="together-composer__input"
+               id="together-chat-input"
+               type="text"
+               maxlength="500"
+               placeholder="Say something…"
+               autocomplete="off">
+        <button type="submit">Send</button>
+      </form>
+    </div>
+  </div>
+</div>
+<script>
+(function () {
+  'use strict';
+
+  var videoId = {{ video_id | tojson }};
+  var streamUrl = {{ url_for('watch.stream', video_id=video['id']) | tojson }};
+  var coverUrl = {{ cover_url | tojson }};
+  var presenceUrl = {{ url_for('together.presence_stream', video_id=video_id) | tojson }};
+  var chatUrl = {{ url_for('together.chat', video_id=video_id) | tojson }};
+  var playUrl = {{ url_for('together.play', video_id=video_id) | tojson }};
+  var positionUrl = {{ url_for('together.position', video_id=video_id) | tojson }};
+
+  var MAX_MESSAGES = 50;
+
+  // --- DPlayer setup (§13.39, mirrored from watch.html) ---
+  var container = document.getElementById('dplayer');
+  var dp = new DPlayer({
+    container: container,
+    autoplay: true,
+    loop: false,
+    hotkey: false,
+    video: { url: streamUrl, type: 'video', pic: coverUrl }
+  });
+  var videoEl = container.querySelector('video');
+
+  // Sync state: the slowest viewer sets the pace (§17.4). The server broadcasts
+  // the pace (target_t) and the username of the slowest viewer. We pause locally
+  // (and show the waiting overlay) when we are more than SYNC_TOLERANCE ahead.
+  var playing = true;
+  var SYNC_TOLERANCE = 1.0;
+  // Suppress native events that are the result of server-driven reconciliation.
+  var suppressPlay = false;
+  var suppressPause = false;
+  var suppressSeek = false;
+
+  var feed = document.getElementById('together-feed');
+  var onlineEl = document.getElementById('online-count');
+  var membersEl = document.getElementById('together-members');
+  var input = document.getElementById('together-chat-input');
+  var MAX_AVATARS = 8;
+  var members = [];
+
+  function renderMembers() {
+    if (!membersEl) return;
+    membersEl.innerHTML = '';
+    var shown = members.slice(0, MAX_AVATARS);
+    shown.forEach(function (m) {
+      var img = document.createElement('img');
+      img.className = 'room-members__avatar';
+      img.src = m.avatar_url || '';
+      img.alt = m.username;
+      img.title = m.username;
+      img.loading = 'lazy';
+      membersEl.appendChild(img);
+    });
+    var extra = members.length - shown.length;
+    if (extra > 0) {
+      var more = document.createElement('span');
+      more.className = 'room-members__more';
+      more.textContent = '+' + extra;
+      more.title = extra + ' more user' + (extra > 1 ? 's' : '') + ' in the room';
+      membersEl.appendChild(more);
+    }
+  }
+  function addMember(user) {
+    if (!user) return;
+    for (var i = 0; i < members.length; i++) {
+      if (members[i].id === user.id) return; // already present (e.g. own join)
+    }
+    members.push(user);
+    renderMembers();
+  }
+  function removeMember(user) {
+    members = members.filter(function (m) { return m.id !== user.id; });
+    renderMembers();
+  }
+
+  function appendMsg(user, text) {
+    var empty = feed.querySelector('.together-feed__empty');
+    if (empty) empty.remove();
+    var msg = document.createElement('div');
+    msg.className = 'together-feed__msg';
+    var avatar = document.createElement('img');
+    avatar.className = 'together-feed__avatar';
+    avatar.src = user.avatar_url || '';
+    avatar.alt = user.username;
+    avatar.loading = 'lazy';
+    var body = document.createElement('div');
+    body.className = 'together-feed__body';
+    var name = document.createElement('div');
+    name.className = 'together-feed__name';
+    name.textContent = user.username;
+    var textEl = document.createElement('div');
+    textEl.className = 'together-feed__text';
+    textEl.textContent = text;
+    body.appendChild(name);
+    body.appendChild(textEl);
+    msg.appendChild(avatar);
+    msg.appendChild(body);
+    feed.appendChild(msg);
+    var msgs = feed.querySelectorAll('.together-feed__msg');
+    while (msgs.length > MAX_MESSAGES) {
+      msgs[0].remove();
+      msgs = feed.querySelectorAll('.together-feed__msg');
+    }
+    feed.scrollTop = feed.scrollHeight;
+  }
+
+  function appendNotice(text) {
+    var el = document.createElement('div');
+    el.className = 'together-feed__notice';
+    el.textContent = text;
+    feed.appendChild(el);
+    feed.scrollTop = feed.scrollHeight;
+  }
+  // Reconcile our playback with the shared pace (§17.4). On an explicit seek
+  // (doSeek) we hard-seek to target_t; otherwise we pause locally when the
+  // group is paused or when we are the fast one more than SYNC_TOLERANCE ahead
+  // of the slowest viewer, and play otherwise (no hard seek for drift).
+  function applyState(p, targetT, slowest, doSeek, pausedBy) {
+    playing = p;
+    if (!videoEl || typeof targetT !== 'number') return;
+    if (doSeek) {
+      suppressSeek = true;
+      videoEl.currentTime = targetT;
+      if (playing && videoEl.paused) {
+        suppressPlay = true;
+        videoEl.play().catch(function(){});
+      } else if (!playing && !videoEl.paused) {
+        suppressPause = true;
+        videoEl.pause();
+      }
+      setWaiting(false);
+      return;
+    }
+    var tooFast = playing && (videoEl.currentTime - targetT) > SYNC_TOLERANCE;
+    if (!playing || tooFast) {
+      if (!videoEl.paused) {
+        suppressPause = true;
+        videoEl.pause();
+      }
+      // When the group is paused, wait for the person who paused; when we are
+      // simply ahead of the pace, wait for the slowest viewer.
+      if (!playing) {
+        setWaiting(true, pausedBy);
+      } else {
+        setWaiting(true, slowest);
+      }
+    } else {
+      if (videoEl.paused) {
+        suppressPlay = true;
+        videoEl.play().catch(function(){});
+      }
+      setWaiting(false);
+    }
+  }
+
+  function setWaiting(show, name) {
+    var el = document.getElementById('togetherWaiting');
+    if (!el) return;
+    if (show && name) {
+      var n = document.getElementById('togetherWaitingName');
+      if (n) n.textContent = name;
+      el.hidden = false;
+    } else {
+      el.hidden = true;
+    }
+  }
+
+  // --- SSE connection ---
+  var es = new EventSource(presenceUrl);
+  es.onmessage = function (e) {
+    var d = JSON.parse(e.data);
+    if (d.type === 'state') {
+      onlineEl.textContent = d.online;
+      members = (d.members || []).slice();
+      renderMembers();
+      if (typeof d.playing !== 'undefined') {
+        // Fresh join: hard-seek to the current pace.
+        applyState(d.playing, d.target_t, d.slowest, true);
+      }
+    } else if (d.type === 'time') {
+      applyState(d.playing, d.target_t, d.slowest, !!d.seek, d.paused_by);
+      if (d.actor) {
+        var verb = d.action === 'seek' ? '跳转了' : d.action === 'pause' ? '暂停了' : '播放了';
+        appendNotice(d.actor + ' ' + verb);
+      }
+    } else if (d.type === 'join') {
+      onlineEl.textContent = d.online;
+      addMember(d.user);
+      appendNotice(d.user.username + ' joined');
+    } else if (d.type === 'leave') {
+      onlineEl.textContent = d.online;
+      removeMember(d.user);
+      appendNotice(d.user.username + ' left');
+    } else if (d.type === 'message') {
+      appendMsg(d.user, d.text);
+    }
+  };
+
+  function postPlay(action, t) {
+    var body = { action: action };
+    if (t !== undefined) body.t = t;
+    fetch(playUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).catch(function(){});
+  }
+
+  if (videoEl) {
+    videoEl.addEventListener('play', function () {
+      if (suppressPlay) { suppressPlay = false; return; }
+      postPlay('play');
+    });
+    videoEl.addEventListener('pause', function () {
+      if (suppressPause) { suppressPause = false; return; }
+      postPlay('pause');
+    });
+    videoEl.addEventListener('seeked', function () {
+      if (suppressSeek) { suppressSeek = false; return; }
+      postPlay('seek', videoEl.currentTime);
+    });
+  }
+
+  // Report our own playback position to the server every 0.5 s so the server
+  // can derive the shared pace (the slowest viewer sets the pace, §17.4).
+  setInterval(function () {
+    if (!videoEl) return;
+    fetch(positionUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ t: videoEl.currentTime }),
+    }).catch(function(){});
+  }, 500);
+
+  // Space key to toggle play/pause (matches the watch page behaviour).
+  document.addEventListener('keydown', function (e) {
+    if (e.key === ' ' && document.activeElement !== input) {
+      e.preventDefault();
+      if (videoEl && !videoEl.paused) {
+        videoEl.pause();
+      } else if (videoEl) {
+        videoEl.play();
+      }
+    }
+  });
+
+  // Chat form.
+  document.getElementById('together-chat-form').addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    var text = input.value.trim();
+    if (!text) return;
+    fetch(chatUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: text }),
+    }).then(function (r) {
+      if (r.ok) input.value = '';
+    }).catch(function(){});
+  });
+})();
+</script>
+{% endblock %}

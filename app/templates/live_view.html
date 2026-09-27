@@ -34,6 +34,7 @@
         <p class="live-view__description">{{ room['description'] }}</p>
         {% endif %}
         <div class="live-side__online">Online: <strong id="live-online">…</strong></div>
+        <div class="room-members" id="live-members"></div>
       </div>
       <div class="live-feed" id="live-feed" aria-live="polite">
         <div class="live-feed__empty">No messages yet — say hello.</div>
@@ -125,9 +126,47 @@
   var chatUrl = {{ url_for('live.chat', room_id=room['id']) | tojson }};
   var feed = document.getElementById('live-feed');
   var onlineEl = document.getElementById('live-online');
+  var membersEl = document.getElementById('live-members');
   var form = document.getElementById('live-composer');
   var input = document.getElementById('live-input');
   var MAX_MESSAGES = 50;
+  var MAX_AVATARS = 8;
+  var members = [];
+
+  function renderMembers() {
+    if (!membersEl) return;
+    membersEl.innerHTML = '';
+    var shown = members.slice(0, MAX_AVATARS);
+    shown.forEach(function (m) {
+      var img = document.createElement('img');
+      img.className = 'room-members__avatar';
+      img.src = m.avatar_url;
+      img.alt = m.username;
+      img.title = m.username;
+      img.loading = 'lazy';
+      membersEl.appendChild(img);
+    });
+    var extra = members.length - shown.length;
+    if (extra > 0) {
+      var more = document.createElement('span');
+      more.className = 'room-members__more';
+      more.textContent = '+' + extra;
+      more.title = extra + ' more user' + (extra > 1 ? 's' : '') + ' in the room';
+      membersEl.appendChild(more);
+    }
+  }
+  function addMember(user) {
+    if (!user) return;
+    for (var i = 0; i < members.length; i++) {
+      if (members[i].id === user.id) return; // already present (e.g. own join)
+    }
+    members.push(user);
+    renderMembers();
+  }
+  function removeMember(user) {
+    members = members.filter(function (m) { return m.id !== user.id; });
+    renderMembers();
+  }
 
   function trim() {
     var empty = feed.querySelector('.live-feed__empty');
@@ -189,11 +228,15 @@
     var data = JSON.parse(e.data);
     if (data.type === 'state') {
       onlineEl.textContent = String(data.online);
+      members = (data.members || []).slice();
+      renderMembers();
     } else if (data.type === 'join') {
       onlineEl.textContent = String(data.online);
+      addMember(data.user);
       notice(data.user.username + ' joined the room');
     } else if (data.type === 'leave') {
       onlineEl.textContent = String(data.online);
+      removeMember(data.user);
       notice(data.user.username + ' left the room');
     } else if (data.type === 'message') {
       message(data.user, data.text);

@@ -149,7 +149,7 @@ def presence_stream(room_id: int) -> Any:
     # The generator never touches the Flask context (me_info is built here),
     # so it can be returned as-is: Werkzeug closes it on client disconnect and
     # its finally block does the presence cleanup.
-    resp = Response(presence.stream(room_id, _me_info(me)), mimetype="text/event-stream")
+    resp = Response(presence.stream(presence.live_room_key(room_id), _me_info(me)), mimetype="text/event-stream")
     resp.headers["Cache-Control"] = "no-cache, no-transform"
     resp.headers["X-Accel-Buffering"] = "no"
     resp.headers["Connection"] = "keep-alive"
@@ -176,7 +176,7 @@ def chat(room_id: int) -> Any:
         return jsonify(ok=False, error="Message is empty."), 400
     if len(text) > _MAX_CHAT_LEN:
         return jsonify(ok=False, error="Message is too long."), 400
-    presence.broadcast_message(room_id, _me_info(me), text)
+    presence.broadcast_message(presence.live_room_key(room_id), _me_info(me), text)
     return jsonify(ok=True)
 
 
