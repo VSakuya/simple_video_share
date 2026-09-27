@@ -6,17 +6,29 @@
   {% include "_admin_nav.html" %}
   <section class="panel">
     <h2>Data &amp; diagnostics</h2>
-    <p class="muted">
-      Export bundles the whole storage area (covers, avatars, database) into a
-      zip — the video cache and logs are left out. Import restores a bundle with
-      path-safety verification.
-    </p>
+
     <div class="admin-data">
-      <a class="btn" href="{{ url_for('admin.export_bundle') }}">Export storage (zip)</a>
-      <form method="post" action="{{ url_for('admin.import_bundle') }}" enctype="multipart/form-data" class="admin-data__import">
-        <input type="file" name="archive" accept="application/zip" required>
-        <button type="submit" class="btn">Import storage</button>
-      </form>
+      <div class="admin-data__section">
+        <p class="muted">
+          Export bundles the whole storage area (covers, avatars, database) into a
+          zip — the video cache and logs are left out.
+        </p>
+        <div class="admin-data__actions">
+          <a class="btn" href="{{ url_for('admin.export_bundle') }}">Export storage (zip)</a>
+        </div>
+      </div>
+
+      <div class="admin-data__section">
+        <p class="muted">
+          Import restores a bundle with path-safety verification.
+        </p>
+        <div class="admin-data__actions">
+          <form method="post" action="{{ url_for('admin.import_bundle') }}" enctype="multipart/form-data" class="admin-data__import">
+            <input type="file" name="archive" accept="application/zip" required>
+            <button type="submit" class="btn">Import storage</button>
+          </form>
+        </div>
+      </div>
     </div>
   </section>
 </div>

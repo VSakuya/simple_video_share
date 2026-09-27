@@ -1501,9 +1501,16 @@ button:disabled { opacity: 0.55; cursor: not-allowed; filter: none; }
 
 /* Admin Data & diagnostics panel (§16.7, §16.8): export/import buttons and the
    WebSocket test. */
-.admin-data { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
-.admin-data__import { display: flex; align-items: center; gap: 8px; flex: 1 1 340px; }
-.admin-data__import input[type="file"] { flex: 1 1 auto; }
+/* Admin Data & diagnostics panel (§16.7, §16.8): two stacked feature sections
+   (Export, then Import). Each has its own description and a natural-width
+   action row — buttons are content-sized with centered text, not full-row. */
+.admin-data { display: flex; flex-direction: column; gap: 20px; }
+.admin-data__section { display: flex; flex-direction: column; gap: 8px; }
+.admin-data__actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* Pico forces width:100% on button[type=submit]; keep these buttons content-sized. */
+.admin-data__actions .btn { width: auto; text-align: center; }
+.admin-data__import { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.admin-data__import input[type="file"] { flex: 0 1 auto; min-width: 0; }
 
 /* ===== Live room page: player + right panel (§16.8) ===== */
 /* Two columns: a big player (1fr) and a fixed 24rem side panel. The row is
