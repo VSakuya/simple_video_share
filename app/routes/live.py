@@ -56,17 +56,19 @@ def _valid_live_url(url: str) -> bool:
 _MAX_CHAT_LEN = 500
 
 
+def _avatar_url(filename: Optional[str]) -> str:
+    """Absolute avatar URL for a stored filename (the default when empty)."""
+    if filename:
+        return url_for("home.avatar_file", filename=filename)
+    return url_for("static", filename="img/avatar-default.svg")
+
+
 def _me_info(user: dict[str, Any]) -> dict[str, Any]:
     """The presence/chat payload for a user: id, name, avatar URL (§16.8)."""
-    avatar = user.get("avatar_filename")
     return {
         "id": user["id"],
         "username": user["username"],
-        "avatar_url": (
-            url_for("home.avatar_file", filename=avatar)
-            if avatar
-            else url_for("static", filename="img/avatar-default.svg")
-        ),
+        "avatar_url": _avatar_url(user.get("avatar_filename")),
     }
 
 
@@ -146,10 +148,27 @@ def presence_stream(room_id: int) -> Any:
         abort(404)
     me = current_user()
     assert me is not None
-    # The generator never touches the Flask context (me_info is built here),
-    # so it can be returned as-is: Werkzeug closes it on client disconnect and
-    # its finally block does the presence cleanup.
-    resp = Response(presence.stream(presence.live_room_key(room_id), _me_info(me)), mimetype="text/event-stream")
+    # Replay the stored chat history (the most recent 50, L62) to the new
+    # connection; built here because the avatar URL needs the Flask context.
+    history = [
+        {
+            "type": "message",
+            "user": {
+                "id": row["user_id"],
+                "username": row["username"],
+                "avatar_url": _avatar_url(row["avatar_filename"]),
+            },
+            "text": row["body"],
+        }
+        for row in db.list_live_messages(room_id)
+    ]
+    # The generator never touches the Flask context (me_info and the replayed
+    # history are built here), so it can be returned as-is: Werkzeug closes it
+    # on client disconnect and its finally block does the presence cleanup.
+    resp = Response(
+        presence.stream(presence.live_room_key(room_id), _me_info(me), history),
+        mimetype="text/event-stream",
+    )
     resp.headers["Cache-Control"] = "no-cache, no-transform"
     resp.headers["X-Accel-Buffering"] = "no"
     resp.headers["Connection"] = "keep-alive"
@@ -159,11 +178,11 @@ def presence_stream(room_id: int) -> Any:
 @live_bp.route("/<int:room_id>/chat", methods=["POST"])
 @login_required
 def chat(room_id: int) -> Any:
-    """Post one ephemeral chat message to the room (§16.8).
+    """Post one chat message to the room (§16.8).
 
-    JSON ``{"text": "..."}``; the message is broadcast to every open presence
-    connection in the room and kept in the room's in-memory ring buffer (capped
-    at 50, L62) so a client that enters later can load the recent history.
+    JSON ``{"text": "..."}``; the message is stored in the database (capped at
+    50 per room, L62, so it survives a restart) and broadcast to every open
+    presence connection; a client that enters later loads the stored history.
     """
     room = db.get_live_room(room_id)
     if room is None:
@@ -176,6 +195,16 @@ def chat(room_id: int) -> Any:
         return jsonify(ok=False, error="Message is empty."), 400
     if len(text) > _MAX_CHAT_LEN:
         return jsonify(ok=False, error="Message is too long."), 400
+    # Persist the message first (so it survives a restart), cap the stored
+    # history at 50, then broadcast it to live connections (§16.8).
+    db.add_live_message(
+        room_id,
+        me["id"],
+        me["username"],
+        me.get("avatar_filename"),
+        text,
+    )
+    db.prune_live_messages(room_id)
     presence.broadcast_message(presence.live_room_key(room_id), _me_info(me), text)
     return jsonify(ok=True)
 

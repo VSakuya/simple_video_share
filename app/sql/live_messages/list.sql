@@ -1,0 +1,1 @@
+SELECT id, user_id, username, avatar_filename, body, created_at FROM live_messages WHERE room_id = ? ORDER BY id ASC LIMIT ?

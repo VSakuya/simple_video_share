@@ -1,0 +1,1 @@
+INSERT INTO live_messages (room_id, user_id, username, avatar_filename, body) VALUES (?, ?, ?, ?, ?)

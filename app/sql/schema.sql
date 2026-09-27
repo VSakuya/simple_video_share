@@ -114,3 +114,20 @@ CREATE TABLE IF NOT EXISTS live_rooms (
     cover_filename  TEXT,
     created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
 );
+
+-- Live-room chat history (§16.8): the most recent 50 messages per room, capped
+-- in the route (db.prune_live_messages). ``username``/``avatar_filename`` are
+-- denormalized snapshots at send time, so a deleted user's history still
+-- renders (no FK on user_id). Deleting a room cascades away its messages
+-- (PRAGMA foreign_keys is ON in get_db).
+CREATE TABLE IF NOT EXISTS live_messages (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    room_id         INTEGER NOT NULL,
+    user_id         INTEGER,
+    username        TEXT,
+    avatar_filename TEXT,
+    body            TEXT    NOT NULL,
+    created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (room_id) REFERENCES live_rooms (id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_live_messages_room ON live_messages (room_id, id);

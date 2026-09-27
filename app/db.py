@@ -110,6 +110,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if "owner_id" not in live_cols:
         conn.execute(_sql("migrations", "live_rooms_add_owner_id"))
 
+    # Live-room chat persistence (§16.8): a brand-new table, so a single
+    # idempotent DDL script (executescript) is all that's needed on live
+    # databases; fresh ones get it from schema.sql.
+    conn.executescript(_sql("migrations", "create_live_messages"))
+
 
 def init_db() -> None:
     """Create all tables (from ``sql/schema.sql``), migrate, and seed defaults."""
@@ -773,6 +778,45 @@ def update_live_room(
 def delete_live_room(room_id: int) -> None:
     conn = get_db()
     conn.execute(_sql("live_rooms", "delete"), (room_id,))
+    conn.commit()
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Live messages (§16.8, chat persistence)
+# ---------------------------------------------------------------------------
+
+def add_live_message(
+    room_id: int,
+    user_id: Optional[int],
+    username: str,
+    avatar_filename: Optional[str],
+    body: str,
+) -> int:
+    conn = get_db()
+    cur = conn.execute(
+        _sql("live_messages", "insert"),
+        (room_id, user_id, username, avatar_filename, body),
+    )
+    conn.commit()
+    message_id = cur.lastrowid
+    assert message_id is not None
+    conn.close()
+    return message_id
+
+
+def list_live_messages(room_id: int, limit: int = 50) -> list[dict[str, Any]]:
+    """The room's recent chat, oldest first (replayed on entry)."""
+    conn = get_db()
+    rows = conn.execute(_sql("live_messages", "list"), (room_id, limit)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def prune_live_messages(room_id: int, keep: int = 50) -> None:
+    """Keep only the most recent ``keep`` messages for the room."""
+    conn = get_db()
+    conn.execute(_sql("live_messages", "prune"), (room_id, room_id, keep))
     conn.commit()
     conn.close()
 

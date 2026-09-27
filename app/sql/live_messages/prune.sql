@@ -1,0 +1,1 @@
+DELETE FROM live_messages WHERE room_id = ? AND id NOT IN (SELECT id FROM live_messages WHERE room_id = ? ORDER BY id DESC LIMIT ?)

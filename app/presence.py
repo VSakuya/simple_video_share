@@ -27,7 +27,7 @@ import json
 import queue
 import threading
 import time
-from typing import Any, Generator
+from typing import Any, Generator, Optional
 
 #: Seconds between heartbeat comments. Must stay well below the browser's
 #: EventSource reconnect timeout (~60 s) and any proxy idle timeout.
@@ -131,7 +131,11 @@ def online_count(key: str) -> int:
         return len(room.members) if room is not None else 0
 
 
-def stream(key: str, me: dict[str, Any]) -> Generator[str, None, None]:
+def stream(
+    key: str,
+    me: dict[str, Any],
+    history: Optional[list[dict[str, Any]]] = None,
+) -> Generator[str, None, None]:
     """Yield the SSE events for one connection of user ``me`` in room ``key``.
 
     ``me`` is ``{"id": int, "username": str, "avatar_url": str}`` (built by the
@@ -167,8 +171,9 @@ def stream(key: str, me: dict[str, Any]) -> Generator[str, None, None]:
         # The online count is the total number of distinct users in the room,
         # including the connecting user (added to room.members above if new).
         online = len(room.members)
-        # Snapshot the recent chat so this connection can replay it (L62).
-        history = list(room.messages)
+        # Replay the recent chat (L62): live rooms pass a DB-backed history;
+        # watch rooms use the in-memory ring buffer.
+        replay = history if history is not None else list(room.messages)
         # Snapshot the member list so the client can render the avatar stack
         # immediately (§17.10); includes the connecting user, added above.
         members = list(room.members.values())
@@ -195,7 +200,7 @@ def stream(key: str, me: dict[str, Any]) -> Generator[str, None, None]:
             if pace[1] is not None:
                 state_payload["slowest"] = pace[1]
         yield _sse(state_payload)
-        for msg in history:
+        for msg in replay:
             yield _sse(msg)
         while True:
             try:
