@@ -1499,8 +1499,6 @@ button:disabled { opacity: 0.55; cursor: not-allowed; filter: none; }
 /* Hub card whose "count" is a word (Settings, Logs) instead of a number. */
 .admin-hub__count--text { font-size: 1.4rem; line-height: 2.2rem; }
 
-/* Admin Data & diagnostics panel (§16.7, §16.8): export/import buttons and the
-   WebSocket test. */
 /* Admin Data & diagnostics panel (§16.7, §16.8): two stacked feature sections
    (Export, then Import). Each has its own description and a natural-width
    action row — buttons are content-sized with centered text, not full-row. */
