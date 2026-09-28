@@ -11,6 +11,7 @@ source code's perspective — never edit those files by hand.
 import hashlib
 import logging
 import os
+import threading
 import time
 import uuid
 from http.client import HTTPException as _HttpClientException
@@ -30,8 +31,16 @@ CREDENTIALS_DIR = str(_ROOT_DIR / "credentials")
 CLIENT_CONFIG = os.path.join(CREDENTIALS_DIR, "client_secret.json")
 CREDS_FILE = os.path.join(CREDENTIALS_DIR, "mycreds.txt")
 
-# Cache the authenticated Drive client for the process lifetime.
-_drive: Optional[GoogleDrive] = None
+# The Drive client and its httplib2/OpenSSL transport are NOT thread-safe:
+# sharing one across concurrent requests corrupts the SSL state and segfaults
+# (the home page fans Drive checks out across worker threads). Give each thread
+# its own lazily-built client via threading.local.
+_tls = threading.local()
+# Serialises client *construction* only (not the network calls, which stay
+# parallel): a first-use build refreshes the token and writes mycreds.txt, so
+# concurrent builds must not interleave on that file. Only the first build
+# refreshes; the rest read the fresh token and skip the round trip.
+_build_lock = threading.Lock()
 
 # Upload retry policy. Drive drops the TLS connection mid-upload on flaky lines
 # (ssl.SSLEOFError / ConnectionResetError / timeout / stall). We upload resumably
@@ -90,11 +99,18 @@ def _has_refresh_token(gauth: GoogleAuth) -> bool:
 
 
 def get_drive() -> GoogleDrive:
-    """Return the shared authenticated Drive client (built lazily)."""
-    global _drive
-    if _drive is None:
-        _drive = _build_drive()
-    return _drive
+    """Return this thread's authenticated Drive client (built lazily).
+
+    The client is per-thread because the underlying httplib2/OpenSSL transport
+    is not thread-safe; a process-wide shared client would segfault under
+    concurrent requests (e.g. the home page's parallel Drive fan-out).
+    """
+    drive = getattr(_tls, "drive", None)
+    if drive is None:
+        with _build_lock:
+            drive = _build_drive()
+        _tls.drive = drive
+    return drive
 
 
 def _service_and_http() -> Tuple[Any, Any]:
@@ -368,7 +384,8 @@ def delete_file(file_id: str) -> None:
 
 def _reset_for_tests() -> None:
     """Drop the cached client and quota (used by tests)."""
-    global _drive, _quota_cache
-    _drive = None
+    global _quota_cache
+    if hasattr(_tls, "drive"):
+        delattr(_tls, "drive")
     _quota_cache = None
     _exists_cache.clear()
