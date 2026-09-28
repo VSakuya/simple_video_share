@@ -53,6 +53,24 @@ def max_cache_bytes(app_config: dict) -> int:
     return int(app_config.get("max_cache_mb", 0)) * 1024 * 1024
 
 
+def actual_cache_bytes(videos_dir) -> int:
+    """Total size (bytes) of locally-cached video files that exist on disk.
+
+    Unlike ``db.sum_cached_bytes`` (the size recorded at upload time), this
+    stats the real files. A row whose ``local_filename`` is set but whose file
+    is missing (e.g. the media was not copied during a server migration)
+    contributes 0, so the total tracks what is actually cached right now.
+    """
+    base = str(videos_dir)
+    total = 0
+    for name in db.list_cached_local_names():
+        try:
+            total += os.path.getsize(os.path.join(base, name))
+        except OSError:
+            continue  # file missing (not migrated / deleted) -> contributes 0
+    return total
+
+
 def ensure_space(
     base_dir: str, incoming_bytes: int, app_config: dict
 ) -> bool:
@@ -109,9 +127,9 @@ def enforce_cache_limit(
         return 0
     protected = set(in_flight_ids or ())
     evicted = 0
-    # Re-read the total on each pass so a partially-deleted file does not
-    # over-count. The loop is bounded by the number of cached videos.
-    while db.sum_cached_bytes() > cap:
+    # Re-read the real on-disk total on each pass so a deleted file is not
+    # over-counted. The loop is bounded by the number of evictable videos.
+    while actual_cache_bytes(videos_dir) > cap:
         candidate = _next_evict_candidate(base_dir, app_config, protected)
         if candidate is None:
             break

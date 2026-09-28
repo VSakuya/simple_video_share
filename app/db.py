@@ -543,6 +543,20 @@ def list_uploading_videos() -> list[dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
+def list_cached_local_names() -> list[str]:
+    """Filenames of locally-cached videos (``local_filename IS NOT NULL``).
+
+    Used to stat the real on-disk cache size; a name whose file is missing on
+    disk (e.g. not copied during a server migration) contributes 0 to the total.
+    """
+    conn = get_db()
+    rows = conn.execute(
+        _sql("videos", "list_cached_local_names")
+    ).fetchall()
+    conn.close()
+    return [row["local_filename"] for row in rows]
+
+
 def sum_cached_bytes() -> int:
     """Return the total recorded size of locally-cached videos (bytes).
 

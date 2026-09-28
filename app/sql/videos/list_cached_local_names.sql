@@ -1,0 +1,1 @@
+SELECT local_filename FROM videos WHERE local_filename IS NOT NULL

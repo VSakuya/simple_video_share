@@ -1,8 +1,9 @@
 """Home blueprint: waterfall listing of all videos (P4)."""
 
+import concurrent.futures
 import logging
 import os
-from typing import Any
+from typing import Any, List, Optional, Tuple
 
 from flask import Blueprint, current_app, render_template, send_from_directory
 from .. import db, drive, storage
@@ -11,17 +12,24 @@ from ..auth import login_required
 home_bp = Blueprint("home", __name__)
 logger = logging.getLogger("simple_video_share.routes.home")
 
+# A page load needs one Drive quota read plus one existence check per
+# non-cached video. Drive is the bottleneck, so we fan those out across a
+# small pool: N sequential round trips collapse into ~one, so a cold cache no
+# longer stalls the page. Kept small so a large library never hammers the API.
+_DRIVE_FANOUT_WORKERS = 8
+
 
 @home_bp.route("/")
 @login_required
 def index() -> Any:
     videos = db.list_folder_videos(None)
-    videos = _drop_missing(videos, current_app.config["VIDEOS_DIR"])
+    kept, drive_free = _resolve_drive(videos, current_app.config["VIDEOS_DIR"])
     return _render_gallery(
-        videos=videos,
+        videos=kept,
         subfolders=db.list_root_folders(),
         current_folder=None,
         breadcrumbs=[],
+        drive_free=drive_free,
     )
 
 
@@ -33,24 +41,26 @@ def folder(folder_id: int) -> Any:
     if current_folder is None:
         abort(404)
     videos = db.list_folder_videos(folder_id)
-    videos = _drop_missing(videos, current_app.config["VIDEOS_DIR"])
+    kept, drive_free = _resolve_drive(videos, current_app.config["VIDEOS_DIR"])
     return _render_gallery(
-        videos=videos,
+        videos=kept,
         subfolders=db.list_child_folders(folder_id),
         current_folder=current_folder,
         breadcrumbs=_breadcrumbs(current_folder),
+        drive_free=drive_free,
     )
 
 
 def _render_gallery(**kwargs: Any) -> Any:
     # The home page reports *cache* remaining space (from the admin-configured
     # Max cache cap), not raw disk free space. Real disk free space is an
-    # admin concern and is shown on the admin page only.
+    # admin concern and is shown on the admin page only. The cache total is the
+    # real on-disk size, so a migration that did not copy the media reads 0
+    # here instead of the phantom upload-time total.
     cap = storage.max_cache_bytes(current_app.config)
-    cached = db.sum_cached_bytes()
+    cached = storage.actual_cache_bytes(current_app.config["VIDEOS_DIR"])
     remaining = max(0, cap - cached) if cap > 0 else 0
-    quota = drive.get_drive_quota()
-    drive_free = quota[2] if quota is not None else None
+    drive_free = kwargs.pop("drive_free", None)
     # §bug L67: annotate each video with its tags so the search box can match
     # on them, and expose the tag library for the tag filter + card badges.
     videos = _annotate_tags(kwargs.get("videos") or [])
@@ -104,17 +114,26 @@ def avatar_file(filename: str) -> Any:
     return send_from_directory(avatars_dir, filename)
 
 
-def _drop_missing(videos: list[dict[str, Any]], videos_dir: Any) -> list[dict[str, Any]]:
-    """Hide videos whose backing file is gone (no local copy AND no Drive file).
+def _resolve_drive(
+    videos: List[dict], videos_dir: Any
+) -> Tuple[List[dict], Optional[int]]:
+    """Apply the local-cache and Drive-existence filters concurrently.
 
-    A video stays visible as long as either a local cache or a Drive copy
-    exists. When a Drive file is deleted (definitive 404) and there is no local
-    cache, the video has nothing to stream and is removed from the listing. A
-    ``None`` from :func:`drive.exists` (Drive API unavailable) keeps the video
-    so a transient error never hides a valid one.
+    Returns ``(kept, drive_free)``. ``kept`` are the videos to show: a video
+    with a local file is flagged ``is_cached=True``; one kept only because a
+    Drive copy still exists is flagged ``is_cached=False``. A video with no local
+    file whose Drive file is gone (definitive 404) is dropped, while a ``None``
+    from :func:`drive.exists` (API unavailable) keeps it so a transient error
+    never hides a valid video. ``drive_free`` is the remaining Drive quota in
+    bytes, or ``None`` when the API is unavailable.
+
+    Every Drive call (the per-video existence checks plus the single quota read)
+    runs in parallel so the page costs ~one network round trip instead of one
+    per video.
     """
-    kept: list[dict[str, Any]] = []
     base = str(videos_dir)
+    kept: List[dict] = []
+    pending: List[Tuple[dict, str]] = []
     for video in videos:
         local = video.get("local_filename")
         # §16.4: annotate whether a locally playable copy exists so the home
@@ -127,13 +146,36 @@ def _drop_missing(videos: list[dict[str, Any]], videos_dir: Any) -> list[dict[st
         drive_id = video.get("google_drive_file_id")
         if not drive_id:
             continue  # neither a local cache nor a Drive reference
-        if drive.exists(drive_id) is False:
-            logger.info(
-                "home: hiding video id=%s title=%r (no local copy, Drive file %s gone)",
-                video.get("id"), video.get("title"), drive_id,
-            )
-            continue
-        # Kept only because a Drive copy still exists -> not cached locally.
-        video["is_cached"] = False
-        kept.append(video)
-    return kept
+        pending.append((video, drive_id))
+
+    drive_free: Optional[int] = None
+    workers = max(1, min(_DRIVE_FANOUT_WORKERS, len(pending) + 1))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        quota_fut = pool.submit(drive.get_drive_quota)
+        exists_futs = {
+            pool.submit(drive.exists, drive_id): (video, drive_id)
+            for video, drive_id in pending
+        }
+        try:
+            quota = quota_fut.result()
+        except Exception as exc:  # noqa: BLE001 - a failed read is "unknown"
+            logger.warning("home: drive quota failed: %s", exc)
+            quota = None
+        drive_free = quota[2] if quota is not None else None
+        for fut in concurrent.futures.as_completed(exists_futs):
+            video, drive_id = exists_futs[fut]
+            try:
+                exists = fut.result()
+            except Exception as exc:  # noqa: BLE001 - a failed check is "unknown"
+                logger.warning("home: drive exists failed for %s: %s", drive_id, exc)
+                exists = None
+            if exists is False:
+                logger.info(
+                    "home: hiding video id=%s title=%r (no local copy, Drive file %s gone)",
+                    video.get("id"), video.get("title"), drive_id,
+                )
+                continue
+            # Kept only because a Drive copy still exists -> not cached locally.
+            video["is_cached"] = False
+            kept.append(video)
+    return kept, drive_free

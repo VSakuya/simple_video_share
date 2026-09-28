@@ -77,7 +77,7 @@ def _storage_stats() -> dict[str, Any]:
     quota = drive.get_drive_quota()
     drive_free = quota[2] if quota is not None else None
     cap = storage.max_cache_bytes(current_app.config)
-    cached = db.sum_cached_bytes()
+    cached = storage.actual_cache_bytes(current_app.config["VIDEOS_DIR"])
     return {
         "cached_bytes": cached,
         "cache_cap_bytes": cap,
