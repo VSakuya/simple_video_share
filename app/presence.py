@@ -240,9 +240,16 @@ def stream(
         }
         if play_state is not None:
             state_payload["playing"] = play_state["playing"]
-            state_payload["target_t"] = (
-                pace[0] if pace[0] is not None else play_state["target_t"]
-            )
+            # A joiner that arrives while a seek is still settling must adopt
+            # the seek target, not the derived pace: the pace is unpinned during
+            # the window and may still reflect a member mid-seek, so it would
+            # send the new client to the wrong point.
+            if play_state.get("seek_settle_until") is not None:
+                state_payload["target_t"] = play_state["seek_t"]
+            else:
+                state_payload["target_t"] = (
+                    pace[0] if pace[0] is not None else play_state["target_t"]
+                )
             state_payload["paused_by"] = play_state.get("paused_by")
             state_payload["seek_t"] = play_state.get("seek_t", 0.0)
             state_payload["seek_seq"] = play_state.get("seek_seq", 0)
@@ -362,10 +369,21 @@ def set_watch_state(
         if action == "play" and not ps["playing"]:
             ps["playing"] = True
             ps["paused_by"] = None
+            # A manual resume that lands while a seek is still settling means
+            # the group should keep playing once the seek completes, so set the
+            # resume flag True (a pause before the seek had set it False); the
+            # tick reads bool(...), so None would wrongly keep the group paused.
+            if ps.get("seek_settle_until") is not None:
+                ps["resume_after_seek"] = True
             changed = True
         elif action == "pause" and ps["playing"]:
             ps["playing"] = False
             ps["paused_by"] = actor
+            # A pause that lands while a seek is still settling keeps the group
+            # paused after the seek completes (resume_after_seek stays False),
+            # so "pause then seek" never resumes playback on its own.
+            if ps.get("seek_settle_until") is not None:
+                ps["resume_after_seek"] = False
             changed = True
         elif action == "seek" and t is not None:
             was_playing = bool(ps["playing"])
@@ -373,12 +391,12 @@ def set_watch_state(
             # to the new point (via the bumped seek_seq) and stays frozen while
             # the seeks land, so the group resumes in sync instead of the
             # seeker waiting while the others crawl forward to the new point.
+            # Members keep reporting their real positions, so the watch tick only
+            # resumes once every client has actually landed on the target
+            # (_all_arrived) or the settle cap is reached -- never before, which
+            # is what keeps a pause+seek from leaving the group out of sync.
             ps["playing"] = False
             ps["paused_by"] = None  # transient seek-pause, not a manual pause
-            # Pin every member's position to the seek target for the settle
-            # window so the shared pace stays on the new point.
-            for pos in room.positions.values():
-                pos["t"] = float(t)
             ps["target_t"] = float(t)
             ps["seek_t"] = float(t)
             ps["seek_seq"] = ps.get("seek_seq", 0) + 1
