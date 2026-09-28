@@ -71,6 +71,12 @@
     if (poll) { clearInterval(poll); poll = null; }
     if (panel) panel.classList.add('hidden');
     if (playerWrap) playerWrap.style.display = '';
+    // The Drive download finished: the video is now cached, so reveal the
+    // Watch Together + Download buttons (rendered hidden while not cached, §19.1).
+    var togetherBtn = document.getElementById('watch-together-btn');
+    if (togetherBtn) togetherBtn.hidden = false;
+    var downloadBtn = document.getElementById('watch-download-btn');
+    if (downloadBtn) downloadBtn.hidden = false;
     // Build the DPlayer now that the stream is available and the wrapper is
     // visible (it was display:none while the Drive download ran).
     if (window.initWatchPlayer) window.initWatchPlayer();
@@ -235,14 +241,14 @@
        src="{{ url_for('home.avatar_file', filename=video['owner_avatar_filename']) if video['owner_avatar_filename'] else url_for('static', filename='img/avatar-default.svg') }}"
        alt="{{ video['owner_name'] }}">
   <span class="video-author__name">{{ video['owner_name'] }}</span>
-  {% if is_cached %}
   <a class="btn video-author__together"
-     href="{{ url_for('together.room', video_id=video['id']) }}">Watch Together</a>
-  {% endif %}
-  {% if video['local_filename'] %}
+     href="{{ url_for('together.room', video_id=video['id']) }}"
+     {% if not is_cached %}hidden{% endif %}
+     id="watch-together-btn">Watch Together</a>
   <a class="btn video-author__download"
-     href="{{ url_for('watch.download', video_id=video['id']) }}">Download</a>
-  {% endif %}
+     href="{{ url_for('watch.download', video_id=video['id']) }}"
+     {% if not is_cached %}hidden{% endif %}
+     id="watch-download-btn">Download</a>
 </div>
 
 {% if video['description'] %}
@@ -304,7 +310,7 @@
     {% for c in comments %}
     {% include "_comment.html" %}
     {% else %}
-    <li class="muted">No comments yet — be the first!</li>
+    <li class="muted" id="no-comments">No comments yet — be the first!</li>
     {% endfor %}
   </ul>
 </section>
@@ -356,6 +362,9 @@
       return r.json().then(function (j) { return { status: r.status, j: j }; });
     }).then(function (res) {
       if (!res.j.ok) { alert(res.j.error); return; }
+      // A comment now exists: drop the "No comments yet" placeholder (§19.3).
+      var empty = document.getElementById('no-comments');
+      if (empty) empty.remove();
       var li = document.createElement('li');
       li.innerHTML = res.j.html;
       // firstElementChild, not firstChild: the rendered comment HTML has leading

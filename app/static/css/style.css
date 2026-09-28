@@ -1443,6 +1443,15 @@ button:disabled { opacity: 0.55; cursor: not-allowed; filter: none; }
   display: none; pointer-events: none;
 }
 .live-badge.is-onair { display: inline-block; }
+/* Viewer count on a live card (§19.2): mirrors .together-badge but sits top-left
+   so it never overlaps the ON AIR badge (top-right); always visible (0 when empty). */
+.live-online {
+  position: absolute; top: 8px; left: 8px;
+  padding: 2px 8px; border-radius: 4px;
+  background: var(--accent); color: #fff;
+  font-size: 0.7rem; font-weight: 700;
+  pointer-events: none;
+}
 
 /* Live view page (§14.8): the streamer's avatar + username and the room
    description sit between the title and the player. */

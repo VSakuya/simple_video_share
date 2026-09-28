@@ -10,6 +10,7 @@
          alt="{{ room['title'] }}" loading="lazy" decoding="async"
          onload="this.classList.add('is-loaded')">
     <span class="live-badge{% if on_air.get(room['id']) %} is-onair{% endif %}">ON AIR</span>
+    <span class="live-online">{{ online.get(room['id'], 0) }} watching</span>
     <div class="card__title">{{ room['title'] }}</div>
     <div class="card__meta">
       <img class="card__avatar"

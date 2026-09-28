@@ -103,10 +103,16 @@ def index() -> str:
 
     The page renders **instantly** with every ON AIR badge off (§14.9); the badge
     state is fetched in the background by the client from ``GET /live/onair``.
-    Probing here (up to 6 s per room) used to block the whole page load.
+    Probing here (up to 6 s per room) used to block the whole page load. The
+    per-room online count is an in-memory presence snapshot baked at render time
+    (§19.2); it refreshes on the next load, not via polling.
     """
     rooms = db.list_live_rooms()
-    return render_template("live_list.html", rooms=rooms, on_air={})
+    online = {
+        room["id"]: presence.online_count(presence.live_room_key(room["id"]))
+        for room in rooms
+    }
+    return render_template("live_list.html", rooms=rooms, on_air={}, online=online)
 
 
 @live_bp.route("/onair")
