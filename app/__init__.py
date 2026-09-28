@@ -60,6 +60,10 @@ def create_app() -> Flask:
     app.config["COVERS_DIR"] = covers_dir
     app.config["AVATARS_DIR"] = avatars_dir
     app.config["DRIVE_FOLDER_ID"] = cfg.get("drive_folder_id", "")
+    # Watch-together max seek wait (§17.4): max seconds the group stays paused
+    # after a seek before resuming even if a client is still landing. The group
+    # resumes as soon as every connected client confirms arrival, capped here.
+    app.config["SEEK_SETTLE_SECONDS"] = float(cfg.get("seek_settle_seconds", 60.0))
 
     # Subpath the app is mounted under behind a reverse proxy (e.g. "/video").
     # Normalize: strip trailing slashes, keep the leading slash. "" (or a lone

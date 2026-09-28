@@ -78,7 +78,8 @@ def room(video_id: int) -> Any:
         return redirect(url_for("watch.page", video_id=video_id))
 
     key = presence.watch_room_key(video_id)
-    presence.init_watch_state(key, video_id, video["title"])
+    settle_seconds = float(current_app.config.get("SEEK_SETTLE_SECONDS", 60.0))
+    presence.init_watch_state(key, video_id, video["title"], settle_seconds)
     presence.start_watch_scheduler()
 
     cover_filename = video.get("cover_filename")

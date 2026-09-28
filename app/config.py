@@ -25,6 +25,12 @@ DEFAULTS: dict[str, Any] = {
     # Subpath the app is mounted under when behind a reverse proxy (e.g. "/video").
     # Empty string means "serve from the domain root" (local development).
     "base_path": "",
+    # Watch-together: max seconds the group stays paused after a seek before
+    # resuming even if a client is still landing. The group resumes as soon as
+    # every connected client has confirmed arrival at the new point, capped at
+    # this value (a slow server serving a large video can need several seconds
+    # for a hard-seek). Must be a multiple of 0.5 (the watch tick).
+    "seek_settle_seconds": 60.0,
 }
 
 

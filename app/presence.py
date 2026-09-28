@@ -46,6 +46,24 @@ _WATCH_TICK_SECONDS = 0.5
 #: many seconds without a fresh report; stale members are excluded from the pace.
 _POSITION_STALE_SECONDS = 3.0
 
+#: Max wait (seconds) the group stays paused after a seek before resuming even
+#: if not every member has landed at the new point yet. The group resumes as
+#: soon as every connected member confirms arrival (§17.4); this is the safety
+#: cap for a stuck/throttled client so the group never waits forever. Set it to
+#: your server's worst-case hard-seek (a slow box serving a large video can need
+#: several seconds). Overridable per deployment via config.json ->
+#: ``seek_settle_seconds`` (loaded into ``app.config["SEEK_SETTLE_SECONDS"]`` and
+#: passed to ``init_watch_state``). Must be an integer multiple of
+#: _WATCH_TICK_SECONDS so the resume fires on a tick.
+_SEEK_SETTLE_SECONDS = 60.0
+
+#: A client's position report within this many seconds of the seek target counts
+#: as "arrived" for the wait-for-all resume (§17.4). After a hard-seek a client
+#: only reports its (new) position once it has landed (it skips reporting while
+#: ``video.seeking`` is set), so this only needs to absorb read-back variance
+#: between browsers (well under a second); 1.0 s is generous.
+_SEEK_ARRIVAL_TOLERANCE = 1.0
+
 
 def live_room_key(room_id: int) -> str:
     """Namespaced key for a live room (§17.3)."""
@@ -70,6 +88,10 @@ class _Room:
         # Watch-together fields (§17); live rooms leave these at their defaults.
         self.video_id: int = 0
         self.title: str = ""
+        # Max wait (seconds) after a seek before resuming even if not every
+        # member has landed (§17.4); set from config at init_watch_state.
+        # Default is the module constant.
+        self.settle_seconds: float = _SEEK_SETTLE_SECONDS
         # Slowest-viewer pacing (§17.4). ``play_state`` carries ``playing``,
         # the current pace ``target_t`` (the slowest fresh position), who paused
         # it (``paused_by``), and the last seek (``seek_seq``/``seek_t``) so a
@@ -122,6 +144,33 @@ def _pace(room: _Room) -> tuple[float | None, str | None]:
             slowest_t = float(pos["t"])
             slowest_name = str(pos.get("username", ""))
     return (slowest_t, slowest_name)
+
+
+def _all_arrived(room: _Room) -> bool:
+    """True when every connected member has confirmed arrival at the seek target.
+
+    Called only while a seek is settling (``seek_settle_until`` set). A member
+    has "arrived" when its latest position report is within
+    :data:`_SEEK_ARRIVAL_TOLERANCE` of the seek target; a member that has not
+    landed yet still holds a stale (far) report, since clients skip reporting
+    while ``video.seeking`` is set. Only connected members (``room.members``) are
+    required to arrive: a member that disconnects is removed on SSE close, so the
+    group never waits on a gone client (the max-wait cap covers the stuck-but-
+    connected case). Callers must hold :data:`_LOCK`.
+    """
+    ps = room.play_state
+    if ps is None:
+        return False
+    settle_until = ps.get("seek_settle_until")
+    seek_t = ps.get("seek_t")
+    if settle_until is None or seek_t is None:
+        return False
+    seek_t = float(seek_t)
+    for uid in room.members:
+        pos = room.positions.get(uid)
+        if pos is None or abs(float(pos["t"]) - seek_t) > _SEEK_ARRIVAL_TOLERANCE:
+            return False
+    return True
 
 
 def online_count(key: str) -> int:
@@ -245,17 +294,25 @@ def broadcast_message(key: str, user: dict[str, Any], text: str) -> int:
         count = sum(len(conns) for conns in room.subs.values())
         _broadcast(room, payload)
         return count
-def init_watch_state(key: str, video_id: int, title: str) -> None:
+def init_watch_state(
+    key: str,
+    video_id: int,
+    title: str,
+    settle_seconds: float = _SEEK_SETTLE_SECONDS,
+) -> None:
     """Create or re-initialise the play state for a watch room.
 
     Called from the room-page route before rendering, so the play state exists
     by the time the first SSE connection opens. Idempotent: if the room already
-    has a play state, it is not overwritten.
+    has a play state, it is not overwritten. ``settle_seconds`` is this room's
+    seek settle window (§17.4); it is refreshed on every call so a config change
+    takes effect on the next seek.
     """
     with _LOCK:
         room = _ROOMS.setdefault(key, _Room())
         room.video_id = video_id
         room.title = title
+        room.settle_seconds = float(settle_seconds)
         if room.play_state is None:
             room.play_state = {
                 "playing": True,
@@ -263,6 +320,13 @@ def init_watch_state(key: str, video_id: int, title: str) -> None:
                 "paused_by": None,
                 "seek_seq": 0,
                 "seek_t": 0.0,
+                # Seek settle window (§17.4): while ``seek_settle_until`` is in
+                # the future the group is paused on the seek target; once it
+                # passes the watch tick resumes playback. ``resume_after_seek``
+                # records whether the group was playing before the seek, so a
+                # seek made while paused stays paused.
+                "seek_settle_until": None,
+                "resume_after_seek": None,
             }
 
 
@@ -275,10 +339,12 @@ def set_watch_state(
     """Handle a play/pause/seek action and broadcast the updated state.
 
     ``action`` is ``"play"``, ``"pause"``, or ``"seek"``. For ``"seek"``, ``t``
-    is the new video position in seconds — every member's reported position is
-    reset to it so the group stays together, ``seek_t`` is set to ``t``, and
-    ``seek_seq`` is bumped so a client that missed this one-shot broadcast
-    hard-seeks to ``seek_t`` on the next tick. When ``actor`` is given and the
+    is the new video position in seconds: the group is paused for a short settle
+    window so every client hard-seeks to ``t`` (via the bumped ``seek_seq``) and
+    stays frozen while the seeks land, then the watch tick resumes playback in
+    sync. Every member's reported position is pinned to ``t`` for the whole
+    settle window, ``seek_t`` is set to ``t``, and ``seek_settle_until`` /
+    ``resume_after_seek`` record when (and whether) to resume. When ``actor`` is given and the
     action actually changes the shared state, the payload also carries ``actor``
     + ``action`` so clients can show a "XXX paused / seeked / resumed" notice. A
     pause records ``paused_by`` (the username) in the play state so every client
@@ -302,13 +368,22 @@ def set_watch_state(
             ps["paused_by"] = actor
             changed = True
         elif action == "seek" and t is not None:
-            # Reset every member's position to the seek target so the group
-            # stays together (the playing state is unchanged by a seek).
+            was_playing = bool(ps["playing"])
+            # Pause the whole group for a settle window: every client hard-seeks
+            # to the new point (via the bumped seek_seq) and stays frozen while
+            # the seeks land, so the group resumes in sync instead of the
+            # seeker waiting while the others crawl forward to the new point.
+            ps["playing"] = False
+            ps["paused_by"] = None  # transient seek-pause, not a manual pause
+            # Pin every member's position to the seek target for the settle
+            # window so the shared pace stays on the new point.
             for pos in room.positions.values():
                 pos["t"] = float(t)
             ps["target_t"] = float(t)
             ps["seek_t"] = float(t)
             ps["seek_seq"] = ps.get("seek_seq", 0) + 1
+            ps["seek_settle_until"] = time.time() + room.settle_seconds
+            ps["resume_after_seek"] = was_playing
             seek = True
             changed = True
 
@@ -402,6 +477,24 @@ def _watch_tick_loop() -> None:
                 ):
                     continue
                 ps = room.play_state
+                # A seek is settling. Resume as soon as every connected member
+                # has confirmed arrival at the target (_all_arrived), or once the
+                # max-wait cap is reached -- whichever first -- so the group never
+                # waits on a stuck/disconnected client. Resuming resets everyone
+                # to the seek target, so a member that was still catching up (it
+                # missed the cap) simply plays forward from the target instead of
+                # dragging the pace back.
+                settle_until = ps.get("seek_settle_until")
+                if settle_until is not None and (
+                    time.time() >= settle_until or _all_arrived(room)
+                ):
+                    ps["playing"] = bool(ps.get("resume_after_seek", True))
+                    ps["paused_by"] = None
+                    ps["seek_settle_until"] = None
+                    ps["resume_after_seek"] = None
+                    for pos in room.positions.values():
+                        pos["t"] = float(ps.get("seek_t", 0.0))
+                    ps["target_t"] = float(ps.get("seek_t", 0.0))
                 target_t, slowest = _pace(room)
                 if target_t is not None:
                     ps["target_t"] = target_t

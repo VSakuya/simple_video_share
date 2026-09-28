@@ -272,9 +272,13 @@
   }
 
   // Report our own playback position to the server every 0.5 s so the server
-  // can derive the shared pace (the slowest viewer sets the pace, §17.4).
+  // can derive the shared pace (the slowest viewer sets the pace, §17.4). Skip
+  // while the video is mid-seek (a group seek or a fresh join): a client that
+  // reports its pre-seek position would become the slowest viewer and freeze the
+  // whole group until it crawls forward to the new point.
   setInterval(function () {
     if (!videoEl) return;
+    if (videoEl.seeking) return;
     fetch(positionUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
