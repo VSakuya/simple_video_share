@@ -18,7 +18,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 VENV_DIR="$SCRIPT_DIR/.venv"
-PYTHON="${PYTHON:-python3.10}"
+PYTHON="${PYTHON:-python3}"
 
 # 1. Pull the latest code so ./start.sh is a self-updating deploy: the VPS
 #    always runs what is on the remote. --ff-only fast-forwards without merge
