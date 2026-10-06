@@ -449,4 +449,25 @@
   refreshTimes(list);
 })();
 </script>
+
+<script>
+// Notification deep-link (§21): arriving from a notification row, the URL
+// carries #c<comment-id>. Scroll the referenced comment into view and flash
+// a highlight on it. Best effort — if the comment was deleted in the
+// meantime the page simply lands on the comments list.
+(function () {
+  'use strict';
+  var m = /^#c(\d+)$/.exec(window.location.hash || '');
+  if (!m) return;
+  var target = document.querySelector('.comments__list [data-comment-id="' + m[1] + '"]');
+  if (!target) return;
+  // Small delay: let the player/cache panel finish laying out so the scroll
+  // target has its final position.
+  setTimeout(function () {
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    target.classList.add('comment--flash');
+    setTimeout(function () { target.classList.remove('comment--flash'); }, 2400);
+  }, 150);
+})();
+</script>
 {% endblock %}

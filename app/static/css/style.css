@@ -35,6 +35,8 @@
   --flash-success-bg: #12351f; --flash-success-fg: #8ef0a0;
   --flash-error-bg: #3a1518;  --flash-error-fg: #ff9a9a;
   --flash-info-bg: #12233a;   --flash-info-fg: #9cc3ff;
+  /* Message-notification red dot (§21): chip + panel rows. */
+  --notify-dot: #ff6b6b;
   /* Pico dark-theme overrides */
   --pico-background-color: #0f1115;
   --pico-card-background-color: #171b22;
@@ -68,6 +70,8 @@
   --flash-success-bg: #d7f2e2; --flash-success-fg: #157347;
   --flash-error-bg: #fbe0e4;  --flash-error-fg: #b4232f;
   --flash-info-bg: #dbe8fb;   --flash-info-fg: #1d5fc0;
+  /* Message-notification red dot (§21): chip + panel rows. */
+  --notify-dot: #dc2626;
   /* Pico light-theme overrides */
   --pico-background-color: #eef1f6;
   --pico-card-background-color: #ffffff;
@@ -227,7 +231,8 @@ h2 { font-size: 1.1rem; }
 .comment__avatar,
 .avatar-lg,
 .video-author__avatar,
-.live-view__avatar {
+.live-view__avatar,
+.notify-row__avatar {
   border: 1.5px solid var(--border-strong);
 }
 
@@ -1726,4 +1731,113 @@ button:disabled { opacity: 0.55; cursor: not-allowed; filter: none; }
 @media (min-width: 769px) {
   body.page--live .together-page { flex: 1 1 auto; min-height: 0; grid-template-rows: 1fr; }
   body.page--live .together-player { min-height: 0; }
+}
+
+/* ===== Message notifications (§21): user-chip dot, dropdown, panel, rows ===== */
+
+/* Red dot on the sidebar user chip's avatar: the is-unread class is baked at
+   render time from the unread_notifications count and kept in sync by
+   notify.js over the per-user SSE feed (notification / unread-cleared). */
+.sidebar__userchip { cursor: pointer; }
+.userchip__avatar { position: relative; display: inline-block; line-height: 0; }
+.userchip__dot {
+  position: absolute; right: -2px; bottom: -2px;
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--notify-dot); border: 2px solid var(--panel);
+  display: none; pointer-events: none;
+}
+.sidebar__userchip.is-unread .userchip__dot { display: block; }
+/* The "Notifications" dropdown entry carries the same dot (inline). */
+.userchip-dropdown__dot {
+  display: inline-block; flex: 0 0 auto;
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--notify-dot);
+}
+
+/* Dropdown (Notifications / My Account) + recent-items panel. Both are
+   position:fixed on <body> and anchored by notify.js to the chip's current
+   rect — to its right, bottom-aligned, clamped to the viewport — so they
+   stay fully on-screen in the expanded sidebar, the collapsed icon rail, and
+   the mobile drawer alike. z-index above the sidebar (50) and the mobile
+   topbar/overlay (60/45). */
+.userchip-dropdown {
+  position: fixed; z-index: 70;
+  min-width: 11rem; padding: 4px;
+  background: var(--panel); border: 1px solid var(--border-strong);
+  border-radius: 8px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  display: flex; flex-direction: column;
+}
+.userchip-dropdown__item {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; padding: 8px 10px;
+  border: none; border-radius: 6px;
+  background: none; color: var(--text);
+  font-size: 0.9rem; font-family: inherit;
+  text-decoration: none; text-align: left; cursor: pointer;
+}
+.userchip-dropdown__item:hover { background: var(--hover); }
+
+.notify-panel {
+  position: fixed; z-index: 70;
+  width: 20rem; max-width: calc(100vw - 16px);
+  max-height: min(28rem, calc(100vh - 16px));
+  display: flex; flex-direction: column;
+  background: var(--panel); border: 1px solid var(--border-strong);
+  border-radius: 10px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+.notify-panel__header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 12px; border-bottom: 1px solid var(--border);
+  font-size: 0.9rem; font-weight: 600;
+}
+.notify-panel__all {
+  color: var(--accent); font-size: 0.8rem; font-weight: 400;
+  text-decoration: none;
+}
+.notify-panel__all:hover { text-decoration: underline; }
+.notify-panel__list { overflow-y: auto; padding: 6px; display: flex; flex-direction: column; gap: 2px; }
+.notify-panel__empty { padding: 10px; font-size: 0.85rem; }
+
+/* Notification rows: shared by the dropdown panel (built by notify.js) and
+   the /notifications page (server-rendered with the same classes), so both
+   surfaces render identically for whatever type arrives. */
+.notify-row {
+  position: relative;
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 8px 10px; border-radius: 8px;
+}
+.notify-row--link { cursor: pointer; }
+.notify-row--link:hover { background: var(--hover); }
+.notify-row__avatar { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; flex: 0 0 auto; }
+.notify-row__main { min-width: 0; }
+.notify-row__text { font-size: 0.85rem; line-height: 1.4; overflow-wrap: anywhere; }
+.notify-row__actor { font-weight: 600; }
+.notify-row__title { color: var(--muted); }
+.notify-row__time { font-size: 0.75rem; color: var(--muted); margin-top: 2px; }
+/* Unread marker: a small dot at the row's right edge (cleared when the panel
+   or /notifications marks everything read). */
+.notify-row--unread::after {
+  content: ""; position: absolute; top: 12px; right: 10px;
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--notify-dot);
+}
+
+/* /notifications page: the rows in a bordered card list. */
+.notify-page__list {
+  list-style: none; margin: 0; padding: 6px;
+  display: flex; flex-direction: column; gap: 2px;
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.notify-page__list .notify-row { border-radius: 0; }
+
+/* Watch page: the notification deep-link (#c<id>) scrolls to the comment and
+   flashes this highlight on it (best effort — a deleted comment simply
+   lands on the list). */
+.comment--flash { animation: comment-flash 2.4s ease-out; }
+@keyframes comment-flash {
+  0% { background: var(--active); }
+  60% { background: var(--active); }
+  100% { background: transparent; }
 }

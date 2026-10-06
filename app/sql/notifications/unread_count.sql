@@ -1,0 +1,1 @@
+SELECT COUNT(*) AS n FROM notifications WHERE user_id = ? AND read_at IS NULL

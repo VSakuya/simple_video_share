@@ -83,7 +83,7 @@ def create_app() -> Flask:
     # templates as ``static_version``.
     def _static_version() -> str:
         chunks = []
-        for rel in ("static/js/inpage.js", "static/css/style.css"):
+        for rel in ("static/js/inpage.js", "static/js/notify.js", "static/css/style.css"):
             p = _APP_DIR / rel
             if p.is_file():
                 chunks.append(p.read_bytes())
@@ -118,6 +118,7 @@ def create_app() -> Flask:
     from .routes.together import together_bp
     from .routes.user import user_bp
     from .routes.admin import admin_bp
+    from .routes.notify import notify_bp, notify_page_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(home_bp)
@@ -127,6 +128,8 @@ def create_app() -> Flask:
     app.register_blueprint(together_bp)
     app.register_blueprint(user_bp)
     app.register_blueprint(admin_bp)
+    app.register_blueprint(notify_bp)
+    app.register_blueprint(notify_page_bp)
     app_logger.info("create_app: ready (%d blueprints registered)", len(app.blueprints))
 
     @app.template_filter("human_size")
@@ -195,6 +198,11 @@ def create_app() -> Flask:
             "svs_base": app.config["BASE_PATH"],
             # Cache-buster for the app's own static assets (see create_app).
             "static_version": app.config["STATIC_VERSION"],
+            # Unread notification count baked at render time (§21): base.html
+            # bakes the red-dot state into the sidebar user chip from it. One
+            # cheap indexed query per page render — the same trade as the
+            # presence snapshots baked on the live list.
+            "unread_notifications": db.unread_count(user["id"]) if user else 0,
         }
 
     @app.before_request

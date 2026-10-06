@@ -85,12 +85,19 @@
     </button>
     {% if session.user_id %}
     <div class="sidebar__footer">
-      <a class="sidebar__item{% if request.path == url_for('auth.account') %} is-active{% endif %}"
-         href="{{ url_for('auth.account') }}" title="Account">
-        <span class="icon"><img class="sidebar__avatar"
-             src="{{ url_for('home.avatar_file', filename=current_user_obj['avatar_filename']) if current_user_obj and current_user_obj['avatar_filename'] else url_for('static', filename='img/avatar-default.svg') }}"
-             alt="avatar"></span><span class="label">Account</span>
-      </a>
+      <!-- User chip (§21): avatar (red dot when unread_notifications > 0,
+           baked at render time) + username. Hover (desktop) / click (touch)
+           reveals the dropdown with Notifications / My Account; notify.js
+           owns the open/close state and the dropdown/panel positioning. -->
+      <div class="sidebar__item sidebar__userchip{% if request.path == url_for('auth.account') %} is-active{% endif %}{% if unread_notifications > 0 %} is-unread{% endif %}"
+           id="userchip" tabindex="0" aria-haspopup="menu" title="{{ session_username }}">
+        <span class="icon"><span class="userchip__avatar">
+          <img class="sidebar__avatar"
+               src="{{ url_for('home.avatar_file', filename=current_user_obj['avatar_filename']) if current_user_obj and current_user_obj['avatar_filename'] else url_for('static', filename='img/avatar-default.svg') }}"
+               alt="avatar">
+          <span class="userchip__dot" aria-hidden="true"></span>
+        </span></span><span class="label">{{ session_username }}</span>
+      </div>
       <a class="sidebar__item" href="{{ url_for('auth.logout') }}"
          data-confirm="Log out of this account?"
          title="Log out ({{ session_username }})">
@@ -224,6 +231,36 @@
        window.svsToast is available; auto-inits every .tag-input on the page. -->
   <script src="{{ url_for('static', filename='js/taginput.js') }}?v={{ static_version }}"></script>
   <div id="svs-toasts" aria-live="polite"></div>
+
+  <!-- Message notifications (§21): the red dot on the sidebar user chip is
+       baked from unread_notifications at render time; notify.js keeps it in
+       sync over the per-user SSE feed. The dropdown and the recent-items
+       panel live on <body> (not inside the sidebar) so they can be anchored
+       fully on-screen, to the right of the rail, even when the sidebar is
+       collapsed to icon-only width. -->
+  {% if session.user_id %}
+  <div id="userchip-dropdown" class="userchip-dropdown" hidden>
+    <button type="button" class="userchip-dropdown__item" id="userchip-notify-item">
+      <span class="userchip-dropdown__dot"{% if unread_notifications <= 0 %} hidden{% endif %}></span>
+      <span>Notifications</span>
+    </button>
+    <a class="userchip-dropdown__item" href="{{ url_for('auth.account') }}">My Account</a>
+  </div>
+  <div id="notify-panel" class="notify-panel" hidden>
+    <div class="notify-panel__header">
+      <span>Notifications</span>
+      <a class="notify-panel__all" href="{{ url_for('notify_page.page') }}">View all</a>
+    </div>
+    <div class="notify-panel__list" id="notify-panel-list"></div>
+  </div>
+  {% endif %}
+  <!-- Message notifications (§21): red dot, dropdown, recent-items panel, and
+       the per-user SSE feed. A no-op on guest pages (no #userchip element).
+       MUST load after the dropdown/panel markup above: the script binds
+       listeners to #userchip-dropdown / #notify-panel at load time, so an
+       earlier position leaves it binding to nothing (§21.1 B.1). Loaded after
+       async.js so window.svsToast is available. -->
+  <script src="{{ url_for('static', filename='js/notify.js') }}?v={{ static_version }}"></script>
 
   <!-- Live room cover crop dialog (Cropper.js, mirrors the video cover flow §13.21).
        Shared by every page carrying .liveroom-cover-btn / .liveroom-cover-input

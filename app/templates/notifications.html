@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block title %}Notifications — Simple Video Share{% endblock %}
+
+{% block content %}
+<!-- Message notifications page (§21): the 100 newest items. The handler
+     marked them all read before rendering (same rule as the dropdown
+     panel), so each row keeps its original unread flag only as a one-time
+     "new" marker. Row markup mirrors makeRow() in notify.js (the dropdown
+     panel builds the same classes on the client). Row click → the
+     /watch/<id>#c<comment_id> deep link, bound by notify.js. A future type
+     that needs its own page (e.g. live) should be a sibling route/template
+     filtering this same table by type, not a new table. -->
+<h1>Notifications</h1>
+{% if items %}
+<ul class="notify-page__list">
+  {% for n in items %}
+  <li class="notify-row{% if n.unread %} notify-row--unread{% endif %}{% if n.video_id %} notify-row--link{% endif %}"
+      {% if n.video_id %}data-href="/watch/{{ n.video_id }}{% if n.comment_id %}#c{{ n.comment_id }}{% endif %}"{% endif %}>
+    <img class="notify-row__avatar" src="{{ n.actor_avatar_url }}" alt="" loading="lazy">
+    <div class="notify-row__main">
+      <div class="notify-row__text">
+        <span class="notify-row__actor">{{ n.actor_username }}</span>
+        {% if n.type == 'comment_reply' %}replied to your comment on{% elif n.type == 'video_comment' %}commented on{% else %}notified you{% endif %}
+        {% if n.video_title %}<span class="notify-row__title">&ldquo;{{ n.video_title }}&rdquo;</span>{% endif %}
+      </div>
+      <div class="notify-row__time muted" data-ts="{{ n.created_at }}">{{ n.created_at[:16] }} UTC</div>
+    </div>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="muted">No notifications yet.</p>
+{% endif %}
+{% endblock %}

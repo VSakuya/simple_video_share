@@ -1,5 +1,6 @@
 """Database layer: SQLite schema, connection helpers, and CRUD queries."""
 
+import json
 import sqlite3
 from pathlib import Path
 from typing import Optional, Any
@@ -114,6 +115,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
     # idempotent DDL script (executescript) is all that's needed on live
     # databases; fresh ones get it from schema.sql.
     conn.executescript(_sql("migrations", "create_live_messages"))
+
+    # Message notifications (§21): a brand-new table, so a single idempotent
+    # DDL script (executescript) upgrades live databases; fresh ones get it
+    # from schema.sql.
+    conn.executescript(_sql("migrations", "create_notifications"))
 
 
 def init_db() -> None:
@@ -946,6 +952,79 @@ def set_video_tags(video_id: int, tag_ids: list[int]) -> None:
     conn.execute(_sql("video_tags", "clear"), (video_id,))
     for tid in tag_ids:
         conn.execute(_sql("video_tags", "insert"), (video_id, int(tid)))
+    conn.commit()
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Notifications (§21)
+# ---------------------------------------------------------------------------
+
+def add_notification(
+    user_id: int,
+    type: str,
+    actor: dict[str, Any],
+    video: dict[str, Any],
+    comment_id: Optional[int] = None,
+    data: Optional[Any] = None,
+) -> int:
+    """Create one notification for ``user_id`` and return its id.
+
+    ``actor`` / ``video`` are the full user / video dicts from which the
+    denormalized snapshot columns (``actor_username``,
+    ``actor_avatar_filename``, ``video_title``) are taken, so a later rename
+    or deletion never breaks rendering. ``type`` is the extensibility axis
+    (``video_comment`` / ``comment_reply`` today); ``data`` is a reserved
+    JSON payload for future type-specific fields.
+    """
+    conn = get_db()
+    payload = json.dumps(data) if data is not None else None
+    cur = conn.execute(
+        _sql("notifications", "insert"),
+        (
+            user_id,
+            type,
+            actor["id"],
+            actor.get("username"),
+            actor.get("avatar_filename"),
+            video.get("id"),
+            video.get("title"),
+            comment_id,
+            payload,
+        ),
+    )
+    conn.commit()
+    notification_id = cur.lastrowid
+    assert notification_id is not None
+    conn.close()
+    return int(notification_id)
+
+
+def list_notifications(user_id: int, limit: int = 20) -> list[dict[str, Any]]:
+    """The user's most recent notifications, newest first (at most ``limit``)."""
+    conn = get_db()
+    rows = conn.execute(
+        _sql("notifications", "list_by_user").replace("{limit}", str(int(limit))),
+        (user_id,),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def unread_count(user_id: int) -> int:
+    """How many of the user's notifications are still unread (read_at NULL)."""
+    conn = get_db()
+    row = conn.execute(
+        _sql("notifications", "unread_count"), (user_id,)
+    ).fetchone()
+    conn.close()
+    return int(row["n"]) if row else 0
+
+
+def mark_all_read(user_id: int) -> None:
+    """Mark all of the user's unread notifications as read."""
+    conn = get_db()
+    conn.execute(_sql("notifications", "mark_all_read"), (user_id,))
     conn.commit()
     conn.close()
 

@@ -10,6 +10,7 @@ from typing import Any, Dict, Set
 from flask import Blueprint, current_app, flash, jsonify, redirect, render_template, request, url_for
 from .. import db
 from ..auth import current_user, login_required
+from ..routes.notify import item_from_parts, push_new
 
 watch_bp = Blueprint("watch", __name__, url_prefix="/watch")
 
@@ -282,6 +283,38 @@ def add_comment(video_id: int) -> Any:
                 flash("Invalid reply target.", "error")
                 return redirect(url_for("watch.page", video_id=video_id))
     comment_id = db.add_comment(video_id, me["id"], body, parent_id=parent_id)
+    # Notification triggers (§21): best-effort — a failure here never breaks
+    # the comment post (the comment is already persisted and is returned
+    # normally). A user never notifies themselves.
+    try:
+        if parent_id is None:
+            # Top-level comment: notify the video's owner (skip if the author
+            # is the owner — commenting on one's own video).
+            owner_id = video["owner_id"]
+            if owner_id != me["id"]:
+                n_id = db.add_notification(
+                    owner_id, "video_comment", me, video, comment_id=comment_id,
+                )
+                push_new(
+                    owner_id,
+                    item_from_parts(n_id, "video_comment", me, video, comment_id),
+                )
+        else:
+            # Reply: notify the parent comment's author (skip when the replier
+            # replies to their own comment). The parent was validated above;
+            # re-read it so a concurrent delete simply skips the notification.
+            parent = db.get_comment_by_id(parent_id)
+            if parent is not None and parent["author_id"] != me["id"]:
+                n_id = db.add_notification(
+                    parent["author_id"], "comment_reply", me, video,
+                    comment_id=comment_id,
+                )
+                push_new(
+                    parent["author_id"],
+                    item_from_parts(n_id, "comment_reply", me, video, comment_id),
+                )
+    except Exception as exc:  # noqa: BLE001 - best-effort contract (§21.5)
+        logger.warning("watch: comment notification failed: %s", exc)
     if not is_ajax:
         return redirect(url_for("watch.page", video_id=video_id))
     # Render just the new comment for the client to insert into the DOM.
