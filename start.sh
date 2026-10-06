@@ -26,7 +26,12 @@ PYTHON="${PYTHON:-python3}"
 #    tracked files or the branch has diverged — a half-updated app never starts.
 #    config.json and documents/PROJECT_PROGRESS.md are git-ignored, so the pull
 #    never touches the VPS's live secret_key / drive_folder_id.
+#    core.fileMode=false makes git ignore exec-bit changes: a manual chmod on
+#    the VPS no longer registers as a local change that blocks the pull.
+#    (start.sh itself is committed as 100755, so the exec bit is preserved in
+#    the tree and ./start.sh keeps working after any update.)
 echo "Pulling latest code (git pull --ff-only) ..."
+git config core.fileMode false
 if ! git pull --ff-only; then
     echo "ERROR: git pull failed; aborting so a half-updated tree never starts." >&2
     echo "  - Uncommitted local edits? Commit or discard them, then retry." >&2
