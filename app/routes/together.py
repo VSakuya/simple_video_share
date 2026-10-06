@@ -51,15 +51,21 @@ def _is_cached(video: dict[str, Any]) -> bool:
 def index() -> Any:
     """List of active watch rooms (non-empty rooms only)."""
     rooms = presence.active_watch_rooms()
-    # Enrich each room with its cover filename for the template.
+    # Enrich each room with its cover filename for the template, plus the
+    # video uploader's identity for the card author row (§20). videos.owner_id
+    # is NOT NULL, so a None user only happens when the uploader account was
+    # deleted after the room was created ("Unknown" + default avatar then).
     enriched = []
     for r in rooms:
         video = db.get_video_by_id(r["video_id"])
+        user = db.get_user_by_id(video["owner_id"]) if video else None
         enriched.append({
             "video_id": r["video_id"],
             "title": r["title"],
             "online": r["online"],
             "cover_filename": video.get("cover_filename") if video else None,
+            "owner_username": user["username"] if user else "Unknown",
+            "owner_avatar": user.get("avatar_filename") if user else None,
         })
     return render_template("together_list.html", rooms=enriched)
 
@@ -124,7 +130,7 @@ def chat(video_id: int) -> Any:
     assert user is not None  # guaranteed by @login_required
 
     data = request.get_json(silent=True) or {}
-    text = (data.get("message") or "").strip()
+    text = (data.get("text") or "").strip()
     if not text:
         return {"ok": False, "error": "empty message"}, 400
     if len(text) > 500:
@@ -149,6 +155,7 @@ def play(video_id: int) -> Any:
         return {"ok": False, "error": "seek requires a numeric 't'"}, 400
 
     user = current_user()
+    assert user is not None  # guaranteed by @login_required
     key = presence.watch_room_key(video_id)
     state = presence.set_watch_state(key, action, t, actor=user["username"])
     if state is None:

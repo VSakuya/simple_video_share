@@ -227,11 +227,16 @@ def seg_start() -> Any:
 @upload_bp.route("/seg/part", methods=["POST"])
 @login_required
 def seg_part() -> Any:
+    from ..auth import current_user
+    me = current_user()
+    assert me is not None
     token = request.form.get("token", "")
     part_index = _optional_int(request.form.get("part_index"))
     sess = _seg_sessions.get(token)
     if sess is None or part_index is None or part_index < 0:
         return jsonify(ok=False, error="Unknown session"), 400
+    if sess["user_id"] != me["id"]:
+        return jsonify(ok=False, error="Session belongs to another user."), 403
     part_file = request.files.get("part")
     if part_file is None:
         return jsonify(ok=False, error="No part received"), 400
@@ -246,10 +251,15 @@ def seg_part() -> Any:
 @upload_bp.route("/seg/finish", methods=["POST"])
 @login_required
 def seg_finish() -> Any:
+    from ..auth import current_user
+    me = current_user()
+    assert me is not None
     token = request.form.get("token", "")
     sess = _seg_sessions.get(token)
     if sess is None:
         return jsonify(ok=False, error="Unknown session"), 400
+    if sess["user_id"] != me["id"]:
+        return jsonify(ok=False, error="Session belongs to another user."), 403
     seg_dir = Path(current_app.config["VIDEOS_DIR"]) / ".segments" / token
     parts = sorted(seg_dir.glob("part_*")) if seg_dir.exists() else []
     if len(parts) != sess["total_parts"]:

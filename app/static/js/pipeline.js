@@ -14,8 +14,14 @@
 //     progressSpeed: Element | null,   // the speed text line (upload phase)
 //   }
 //
-// WebCodecs requires a secure context (HTTPS or localhost); in an insecure
-// context the transcode stage is skipped and the original file passes through.
+// Transcode engines (in priority order):
+//   Stage 1 — mediabunny (WebCodecs, hardware-accelerated): AV1 then H.264.
+//             Requires a secure context (HTTPS or localhost).
+//   Stage 2 — ffmpeg.wasm (software): AV1 (libsvtav1) then H.264 (libx264),
+//             audio copy first, AAC re-encode if the copy fails.
+//   If a transcode is REQUIRED (caps not met or clip selected) and every
+//   engine fails, the upload is BLOCKED — the original file is never passed
+//   through silently (§13.13 / §17.1).
 
 import { FFmpeg } from "./ffmpeg/lib/index.js";
 
@@ -316,27 +322,34 @@ export async function processVideo(file, opts, ctx) {
     log("warn", "mediabunny unavailable: " + reason + " - falling back to ffmpeg.wasm.");
   }
 
-  // Stage 2 - ffmpeg.wasm (software) as the last resort.
-  for (const enc of ["libx264", "libvpx"]) {
+  // Stage 2 - ffmpeg.wasm (software): AV1 (libsvtav1) then H.264 (libx264);
+  // audio is copied first and re-encoded to AAC if the copy is not MP4-compatible.
+  const ffmpegAttempts = [
+    { encoder: "libsvtav1", audio: "copy" },
+    { encoder: "libsvtav1", audio: "aac" },
+    { encoder: "libx264", audio: "copy" },
+    { encoder: "libx264", audio: "aac" },
+  ];
+  for (const attempt of ffmpegAttempts) {
     try {
-      log("info", "Transcoding with ffmpeg.wasm (encoder=" + enc + ").");
+      log("info", "Transcoding with ffmpeg.wasm (encoder=" + attempt.encoder + ", audio=" + attempt.audio + ").");
       const blob = await runFfmpeg(file, {
-        encoder: enc, bitrateKbps, capHeight, capFps,
+        encoder: attempt.encoder, audio: attempt.audio, bitrateKbps, capHeight, capFps,
         trimStart: clip ? clip.start : undefined,
         trimEnd: clip ? clip.end : undefined,
       }, ctx);
       log("info", "ffmpeg done - output " + fmtMB(blob.size));
       return { blob, info: probe };
     } catch (err) {
-      log("warn", "ffmpeg (" + enc + ") failed: " + err);
+      log("warn", "ffmpeg.wasm " + attempt.encoder + "/" + attempt.audio + " failed: " + err);
     }
   }
 
   // A required transcode could not run - BLOCK the upload (never pass a
   // non-compliant original through).
   const why = reason !== null
-    ? "mediabunny unavailable (" + reason + ") and ffmpeg.wasm failed for every encoder"
-    : "mediabunny and ffmpeg.wasm both failed for every codec/encoder";
+    ? "mediabunny unavailable (" + reason + ") and ffmpeg.wasm failed for all 4 encoder/audio combinations"
+    : "mediabunny and ffmpeg.wasm both failed for all codec/encoder attempts";
   throw new Error(why);
 }
 
@@ -389,7 +402,8 @@ async function runFfmpeg(file, opts, ctx) {
       "-bufsize",
       String(opts.bitrateKbps * 2) + "k"
     );
-    args.push("-c:a", "copy");
+    args.push("-c:a", opts.audio || "copy");
+    if (opts.audio === "aac") args.push("-b:a", "128k");
     args.push("output.mp4");
     log("info", "[ffmpeg] exec: " + JSON.stringify(args));
 

@@ -221,9 +221,9 @@ h2 { font-size: 1.1rem; }
 [hidden] { display: none !important; }
 
 /* Avatar borders (§16.5): a thin visible frame on every user avatar, so faces
-   read clearly on any background. Applied to all avatar <img> selectors. */
+   read clearly on any background. Applied to all avatar <img> selectors.
+   (.card__avatar is excluded — §20 gives it its own 3 px border + shadow.) */
 .sidebar__avatar,
-.card__avatar,
 .comment__avatar,
 .avatar-lg,
 .video-author__avatar,
@@ -276,7 +276,11 @@ button:hover { filter: brightness(1.1); }
   background: var(--panel-2); opacity: 0; transition: opacity 0.3s ease;
 }
 .card__cover.is-loaded { opacity: 1; }
-.card__title { padding: 8px 10px 0; font-size: 0.9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Cover wrapper (§20.2): the containing block for the comment badge, so the
+   badge's right/bottom offsets mean the *cover's* bottom-right corner (not
+   the card's) on every home/folder video card. */
+.card__cover-wrap { position: relative; }
+.card__title { padding: 4px 10px 0; font-size: 0.9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card__tags { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px 10px 0; }
 .card__tag {
   font-size: 0.68rem; padding: 1px 7px; border-radius: 999px;
@@ -305,21 +309,39 @@ button:hover { filter: brightness(1.1); }
   font-size: 0.8rem; color: var(--text); padding: 3px 2px;
 }
 .tag-input__field::placeholder { color: var(--muted); }
-.card__meta {
-  padding: 0 10px 8px;
-  font-size: 0.8rem;
+/* Uploader row (§20 follow-up): the 64 px avatar is pulled up over the cover's
+   bottom edge (its lower half overlaps the cover). The name is aligned to the
+   row's bottom (align-items: flex-end) so it sits entirely below the cover's
+   bottom edge and never covers the cover. */
+.card__author {
+  position: relative;
+  z-index: 2;
+  margin-top: -32px;
+  padding: 0 10px;
   display: flex;
-  align-items: center;
-  gap: 6px;
+  align-items: flex-end;
+  gap: 8px;
 }
 .card__avatar {
-  width: 20px;
-  height: 20px;
+  width: 64px;
+  height: 64px;
   border-radius: 50%;
   object-fit: cover;
   flex: 0 0 auto;
+  border: 3px solid var(--border-strong);
+  background: var(--panel);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
 }
-.card__owner { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card__owner { font-size: 1rem; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card__meta {
+  padding: 4px 10px 8px;
+  font-size: 0.72rem;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
 .card__date { flex: 0 0 auto; }
 
 /* Pinned badge (§16.6): a small pin marker over a pinned video card's cover. */
@@ -357,6 +379,27 @@ button:hover { filter: brightness(1.1); }
   z-index: 1;
 }
 .card__remote svg { width: 12px; height: 12px; }
+/* Comment-count badge (§20.2): same capsule as the Remote badge, anchored to
+   the bottom-right of the cover image on every card (its containing block is
+   the .card__cover-wrap, not the card); Pinned (top-left) and Remote
+   (top-right) never collide with it, so no pinned-card fallback is needed.
+   Hidden for 0-comment videos. */
+.card__comments {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.62);
+  color: #e6e8ee;
+  font-size: 0.72rem;
+  font-weight: 600;
+  z-index: 1;
+}
+.card__comments svg { width: 12px; height: 12px; }
 /* Inline "Pinned" pill, reused anywhere a pinned video is listed (e.g. admin). */
 .pin-badge {
   display: inline-flex;
@@ -398,9 +441,17 @@ button:hover { filter: brightness(1.1); }
 }
 .folder-card__cover svg { width: 44px; height: 44px; }
 .folder-card__title {
-  padding: 8px 10px 28px; font-size: 1rem; font-weight: 600;
+  padding: 8px 10px 58px; font-size: 1rem; font-weight: 600;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+/* The 58 px bottom padding keeps a folder cell the same total height as a
+   tag-less video cell (§20 follow-up): the redesigned video body now
+   contributes 32 px (64 px avatar minus its 32 px cover overlap, up from 24 px
+   at the 48 px era) + title line + date row. The 8 px growth over the
+   48 px-era value keeps folder cells level with tag-less video cells.
+   X = 58 px is a best-fit: the root font size is still the viewport clamp
+   (13–22 px), so no single X is exact for every viewport and the owner's
+   browser pass is the final check. */
 
 /* Breadcrumb trail (§13.26). */
 .breadcrumb {
@@ -1435,6 +1486,9 @@ button:disabled { opacity: 0.55; cursor: not-allowed; filter: none; }
 /* List page: 16:9 cover tile + an "ON AIR" badge (server-side probe, §14.7) +
    an owner row (avatar + username) matching the home video cells (§14.8). */
 .live-card { position: relative; }
+/* §20 sync: live cards end with the title (no date row), so its bottom
+   padding matches the home cards' date-row bottom padding. */
+.live-card .card__title, .together-card .card__title { padding-bottom: 8px; }
 .live-badge {
   position: absolute; top: 8px; right: 8px;
   padding: 2px 8px; border-radius: 4px;

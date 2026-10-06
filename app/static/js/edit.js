@@ -1,20 +1,20 @@
-// upload.js — client-side transcode / clip / cover, then (segmented) upload.
+// edit.js — single-file clip / edit page: probe, transcode, cover, upload.
 //
-// Pipeline (project_requirements.md, Section 3 + R4/R5):
+// Pipeline (documents/PROJECT_PROGRESS.md §13):
 //   1. Probe the source (duration / height / fps / bitrate) — via mediabunny
 //      (WebCodecs) when available, else an HTML5 <video> element.
 //   2. Direct pass when there is no clip and all caps are already met;
-//      otherwise transcode with mediabunny (WebCodecs, hardware-accelerated,
-//      AV1 with H.264 fallback, caps: 1080p / 60fps / admin bitrate). When
-//      WebCodecs is unavailable or the transcode fails, the original file is
-//      passed through so the upload is never lost. Plus an optional clip range.
+//      otherwise transcode:
+//        Stage 1 — mediabunny (WebCodecs, hardware-accelerated, AV1 then
+//          H.264; caps: 1080p / 60fps / admin bitrate).
+//        Stage 2 — ffmpeg.wasm (software): AV1 (libsvtav1) then H.264
+//          (libx264), audio copy first, AAC re-encode if the copy fails.
+//      A required transcode that fails on every engine BLOCKS the upload
+//      (no silent pass-through of a non-compliant original, §13.13).
 //   3. Extract a cover from the 60s frame (mediabunny WebCodecs decode, else
 //      an HTML5 <video> seek) or use a user-provided one.
 //   4. Upload: single POST when the final file is <= 1 GB, otherwise split it
 //      into <= 512 MB segments via /upload/seg/* (R4).
-//
-// WebCodecs requires a secure context (HTTPS or localhost); in an insecure
-// context the transcode stage is skipped and the original file passes through.
 
 import { FFmpeg } from "./ffmpeg/lib/index.js";
 

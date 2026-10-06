@@ -64,6 +64,11 @@ def _render_gallery(**kwargs: Any) -> Any:
     # §bug L67: annotate each video with its tags so the search box can match
     # on them, and expose the tag library for the tag filter + card badges.
     videos = _annotate_tags(kwargs.get("videos") or [])
+    # §20: annotate each video with its comment count (replies included) so
+    # every rendered card can show the cover badge. Runs on the Drive-filtered
+    # list, so the page costs exactly one aggregate query over the cards that
+    # are actually shown (home and folder pages alike).
+    videos = _annotate_comment_counts(videos)
     return render_template(
         "home.html",
         cached_bytes=cached,
@@ -81,6 +86,18 @@ def _annotate_tags(videos: list[dict[str, Any]]) -> list[dict[str, Any]]:
     mapping = db.bulk_video_tags(ids)
     for v in videos:
         v["tags"] = mapping.get(v["id"], [])
+    return videos
+
+
+def _annotate_comment_counts(videos: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Attach a ``comment_count`` (replies included, default 0) to each video.
+
+    §20: one aggregate query per page covers every rendered card; the home
+    card renders the cover comment badge only when the count is non-zero.
+    """
+    counts = db.comment_counts([v["id"] for v in videos])
+    for v in videos:
+        v["comment_count"] = counts.get(v["id"], 0)
     return videos
 
 

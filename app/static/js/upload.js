@@ -197,8 +197,12 @@ async function processOne(item) {
 }
 
 let successTimer = null;
-function showSuccess() {
+function showSuccess(message) {
   $("success-overlay").classList.remove("hidden");
+  if (message) {
+    const msgEl = $("success-message");
+    if (msgEl) msgEl.textContent = message;
+  }
   const countdown = $("success-countdown");
   let n = 3;
   countdown.textContent = String(n);
@@ -236,21 +240,32 @@ async function startQueue() {
     startBtn.textContent = "Upload queue";
     return;
   }
+  let okCount = 0;
+  let failCount = 0;
   for (const item of queue) {
     try {
       await processOne(item);
+      okCount++;
     } catch (err) {
       const msg = err && err.message ? err.message : String(err);
       setItemStatus(item, "Error: " + msg, true);
       log("error", item.title + " failed: " + msg);
+      failCount++;
     }
   }
   cancelActiveTranscode();
   processing = false;
   startBtn.textContent = "Upload queue";
   updateCount();
-  log("info", "Queue complete");
-  showSuccess();
+  if (okCount === 0) {
+    log("info", "Queue complete - all " + failCount + " file(s) failed");
+  } else if (failCount > 0) {
+    log("info", "Queue complete - " + okCount + " succeeded, " + failCount + " failed");
+    showSuccess(okCount + " of " + queue.length + " file(s) uploaded");
+  } else {
+    log("info", "Queue complete");
+    showSuccess();
+  }
 }
 
 // --- Event wiring ---

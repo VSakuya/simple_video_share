@@ -88,10 +88,32 @@
       Remote
     </span>
     {% endif %}
-    <img class="card__cover"
-         src="{{ url_for('home.cover', filename=video['cover_filename']) if video['cover_filename'] else url_for('static', filename='img/placeholder.svg') }}"
-         alt="{{ video['title'] }}" loading="lazy" decoding="async"
-         onload="this.classList.add('is-loaded')">
+    {% if video['comment_count'] %}
+    <div class="card__cover-wrap">
+      <img class="card__cover"
+           src="{{ url_for('home.cover', filename=video['cover_filename']) if video['cover_filename'] else url_for('static', filename='img/placeholder.svg') }}"
+           alt="{{ video['title'] }}" loading="lazy" decoding="async"
+           onload="this.classList.add('is-loaded')">
+      <span class="card__comments">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        {{ video['comment_count'] }}
+      </span>
+    </div>
+    {% else %}
+    <div class="card__cover-wrap">
+      <img class="card__cover"
+           src="{{ url_for('home.cover', filename=video['cover_filename']) if video['cover_filename'] else url_for('static', filename='img/placeholder.svg') }}"
+           alt="{{ video['title'] }}" loading="lazy" decoding="async"
+           onload="this.classList.add('is-loaded')">
+    </div>
+    {% endif %}
+    <div class="card__author">
+      <img class="card__avatar"
+           src="{{ url_for('home.avatar_file', filename=video['owner_avatar_filename']) if video['owner_avatar_filename'] else url_for('static', filename='img/avatar-default.svg') }}"
+           alt="{{ video['owner_name'] }}" loading="lazy">
+      <span class="card__owner muted">{{ video['owner_name'] }}</span>
+    </div>
     <div class="card__title">{{ video['title'] }}</div>
     {% if video['tags'] %}
     <div class="card__tags">
@@ -101,10 +123,6 @@
     </div>
     {% endif %}
     <div class="card__meta">
-      <img class="card__avatar"
-           src="{{ url_for('home.avatar_file', filename=video['owner_avatar_filename']) if video['owner_avatar_filename'] else url_for('static', filename='img/avatar-default.svg') }}"
-           alt="{{ video['owner_name'] }}" loading="lazy">
-      <span class="card__owner muted">{{ video['owner_name'] }}</span>
       <span class="card__date muted" data-ts="{{ video['uploaded_at'] if video['uploaded_at'] else '' }}"></span>
     </div>
   </a>

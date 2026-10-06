@@ -94,12 +94,18 @@ def _cached_filename(title: str, videos_dir: str) -> str:
 def start_cache(video_id: int) -> Any:
     """Begin a background Drive -> local download for a non-cached video (§13.33).
 
+    Only the video owner or an admin can trigger the download (non-owners can
+    still watch in-flight progress via cache_status).
     Returns JSON. If the video is already cached (or a download is already
     running) the caller can simply start polling ``cache_status``.
     """
     video = db.get_video_by_id(video_id)
     if video is None:
         return jsonify(ok=False, error="Video not found."), 404
+    me = current_user()
+    assert me is not None
+    if video["owner_id"] != me["id"] and not me.get("is_admin"):
+        return jsonify(ok=False, error="Only the uploader (or an admin) can start this download."), 403
     drive_id = video.get("google_drive_file_id")
     if not drive_id:
         return (

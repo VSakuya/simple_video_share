@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from flask import Flask, redirect, request, session, url_for
+from markupsafe import Markup
 
 from . import config as app_config
 from . import db
@@ -176,7 +177,6 @@ def create_app() -> Flask:
         """
         import json
         import html
-        from markupsafe import Markup
         payload = json.dumps(value, ensure_ascii=True)
         return Markup(html.escape(payload, quote=True))
 

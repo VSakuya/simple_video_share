@@ -24,7 +24,7 @@ PYTHON="${PYTHON:-python3}"
 #    always runs what is on the remote. --ff-only fast-forwards without merge
 #    commits and aborts (see set -e) if the tree has uncommitted edits to
 #    tracked files or the branch has diverged — a half-updated app never starts.
-#    config.json and project_requirements.md are git-ignored, so the pull
+#    config.json and documents/PROJECT_PROGRESS.md are git-ignored, so the pull
 #    never touches the VPS's live secret_key / drive_folder_id.
 echo "Pulling latest code (git pull --ff-only) ..."
 if ! git pull --ff-only; then

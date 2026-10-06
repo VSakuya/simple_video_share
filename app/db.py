@@ -713,6 +713,26 @@ def delete_comment(comment_id: int) -> None:
     conn.close()
 
 
+def comment_counts(video_ids: list[int]) -> dict[int, int]:
+    """Map each id in ``video_ids`` to its comment count (replies included).
+
+    One aggregate query over the rendered cards only (``$ids`` is replaced with
+    N literal placeholders, like ``bulk_video_tags``); ids with no comments are
+    absent from the result. Empty input returns ``{}`` without touching the DB.
+    Feeds the home card comment-count badge (§20).
+    """
+    if not video_ids:
+        return {}
+    qmarks = ",".join("?" * len(video_ids))
+    conn = get_db()
+    rows = conn.execute(
+        _sql("comments", "count_by_video").replace("$ids", qmarks),
+        tuple(video_ids),
+    ).fetchall()
+    conn.close()
+    return {int(r["video_id"]): int(r["n"]) for r in rows}
+
+
 # ---------------------------------------------------------------------------
 # Live rooms (§14.6)
 # ---------------------------------------------------------------------------

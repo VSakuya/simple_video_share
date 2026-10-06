@@ -28,18 +28,11 @@ from ..live_probe import probe_stream
 live_bp = Blueprint("live", __name__, url_prefix="/live")
 logger = logging.getLogger("simple_video_share.routes.live")
 
-# Basic-auth for the stream server — temporary (§14.7), used only by the
-# on-air probe below and never sent to the browser. To be replaced by a
-# config entry later.
-_STREAM_USER = "MOYUER"
-_STREAM_PASSWORD = "456456"
-
-
 def _probe(url: str, base: str) -> bool:
     """Probe one room; a root-relative url is resolved against this host."""
     if url.startswith("/"):
         url = base + url.lstrip("/")
-    return probe_stream(url, _STREAM_USER, _STREAM_PASSWORD)
+    return probe_stream(url)
 
 
 #: A live-room stream link must be a full URL (``http(s)://...``) or a path on
@@ -121,8 +114,9 @@ def onair() -> Any:
     """Background on-air probe (§14.9): JSON ``{room_id: is_on_air}``.
 
     Fetched by the list page *after* it loads, so the page renders instantly and
-    the badges light up a few seconds later. The probe stays server-side (§14.7)
-    because the stream server sits behind Apache Basic auth.
+    the badges light up a few seconds later. The probe stays server-side (§14.7);
+    the reverse proxy guards .flv with a Referer/User-Agent whitelist so the
+    probe passes via its User-Agent without Basic-auth credentials.
     """
     rooms = db.list_live_rooms()
     on_air = _on_air_map(rooms)
