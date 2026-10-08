@@ -22,6 +22,7 @@
 
   var base = window.SVS_BASE || '';
   var listUrl = base + '/notify/api/list?limit=20';
+  var resyncUrl = base + '/notify/api/list?limit=1';
   var readUrl = base + '/notify/api/read';
   var streamUrl = base + '/notify/stream';
   var CLOSE_DELAY = 180; // ms of grace so the pointer can cross into the menu
@@ -259,6 +260,19 @@
   // another tab marked everything read). EventSource reconnects on its own.
   if (window.EventSource) {
     var es = new EventSource(streamUrl);
+    // Resync the dot on every (re)establishment of the feed: 'notification'
+    // events broadcast during a disconnect window (server restart, network
+    // blip) are never replayed, so after the initial connect and after each
+    // automatic reconnect the unread count is re-fetched (limit=1 keeps the
+    // payload tiny) and the dot is aligned to it — one GET per reconnect,
+    // no polling. A full page render already bakes the correct initial state,
+    // so a transient fetch failure simply leaves the dot as it is.
+    es.addEventListener('open', function () {
+      fetch(resyncUrl)
+        .then(function (r) { return r.json(); })
+        .then(function (j) { if (j.ok) setDot(!!j.unread); })
+        .catch(function () { /* transient: the current dot state stands */ });
+    });
     es.addEventListener('message', function (e) {
       var data;
       try { data = JSON.parse(e.data); } catch (err) { return; }
