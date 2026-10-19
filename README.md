@@ -1,5 +1,10 @@
 # Simple Video Share
 
+[English](./README.md) | [日本語](./README.ja.md) | [简体中文](./README.zh-CN.md)
+
+> English is the source of truth. Other language files are translations of this
+> document.
+
 A lightweight video-sharing web app designed for a **very weak server**: all
 heavy processing (transcoding, clipping, cover extraction) happens
 **client-side in the browser** (WebCodecs via mediabunny, with an ffmpeg.wasm
@@ -26,8 +31,7 @@ worker.
 
 ## Requirements
 
-- Python **3.12** (the code is also compatible with 3.11; the current dev venv
-  is 3.11.3) — a virtual environment at `.venv/`.
+- Python **3.12** or above — a virtual environment at `.venv/`.
 - `pip install -r requirements.txt` (flask, pydrive2, waitress).
 - `config.json` at the project root — copy `config.example.json`; the secret
   key is auto-seeded on first run.
@@ -39,14 +43,3 @@ worker.
 ## Run
 
 - Local development: `python main.py`
-- Production: `./start.sh` (self-updating `git pull --ff-only`, starts
-  `waitress-serve wsgi:app` with a PID file)
-
-## Documentation
-
-The single source of truth is **`documents/PROJECT_PROGRESS.md`** (requirements,
-decisions, dated change log, project rules) — it is git-ignored and travels
-with the deployment, so it is not in the repository. Pending code changes are
-registered in dated `documents/code_review_YYYY-MM-DD_HHMM.md` files (timestamp
-includes the creation time so same-day sheets never collide) before
-implementation. Test/probe scripts live under `testing/`.
