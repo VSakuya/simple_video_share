@@ -6,6 +6,7 @@
      exposes the global `flvjs`). Both are local; no CDN dependency. -->
 <script src="{{ url_for('static', filename='vendor/dplayer/DPlayer.min.js') }}?v={{ static_version }}"></script>
 <script src="{{ url_for('static', filename='vendor/flvjs/flv.min.js') }}?v={{ static_version }}"></script>
+<script src="{{ url_for('static', filename='js/live-player.js') }}?v={{ static_version }}"></script>
 {% endblock %}
 {% block content %}
 <nav class="breadcrumb" aria-label="Breadcrumb">
@@ -48,16 +49,13 @@
   </div>
 </div>
 <script>
-// DPlayer + flv.js live player (§13.41): the same customFlv integration as the
-// reference index.html, adapted to the app. `live: true` gives DPlayer the live
-// UI (no seek bar, LIVE badge); the progress chaser is preserved verbatim.
+// DPlayer keeps the live UI; the controller handles catch-up and recovery (§23).
 (function () {
   'use strict';
   var url = {{ room['url'] | tojson }};
   var flvUrl = url; // the room's stream link (§14.6)
   var container = document.getElementById('dplayer');
-  var flvPlayer = null;
-  var chaser = undefined;
+  var playback = null;
 
   var dp = new DPlayer({
     container: container,
@@ -69,25 +67,13 @@
       type: 'customFlv',
       customType: {
         customFlv: function (video, player) {
-          flvPlayer = flvjs.createPlayer({
-            type: 'flv',
+          if (playback) playback.destroy();
+          playback = SvsLivePlayback.create(video, {
             url: video.src,
-            isLive: true
+            debug: new URLSearchParams(window.location.search).get('liveDebug') === '1',
+            onFatalError: function (message) { player.notice(message, 6000); }
           });
-          flvPlayer.attachMediaElement(video);
-          flvPlayer.load();
-
-          // install progress chaser (preserved from the reference): while
-          // playing, jump back to the live edge if we fall >5s behind.
-          if (!chaser) {
-            chaser = setInterval(function () {
-              if (video.buffered.length < 1) return;
-              var delayTime = video.buffered.end(0) - video.currentTime;
-              if (!video.paused && delayTime > 5) {
-                video.currentTime = video.buffered.end(0) - 0.5;
-              }
-            }, 3000);
-          }
+          playback.start();
         }
       }
     }
@@ -109,10 +95,15 @@
     }
   }
 
-  // Clean up on navigation: stop the chaser and destroy the flv.js player.
-  window.addEventListener('beforeunload', function () {
-    if (chaser) clearInterval(chaser);
-    if (flvPlayer) { try { flvPlayer.destroy(); } catch (e) { /* ignore */ } }
+  // Snapshots stay in this tab and never contain stream URLs or credentials.
+  window.svsLiveDiagnostics = function () {
+    return playback ? playback.getDiagnostics() : null;
+  };
+  function cleanup() { if (playback) playback.destroy(); }
+  dp.on('destroy', cleanup);
+  window.addEventListener('beforeunload', cleanup);
+  window.addEventListener('pagehide', function (event) {
+    if (!event.persisted) cleanup();
   });
 })();
 </script>

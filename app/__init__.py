@@ -77,13 +77,16 @@ def create_app() -> Flask:
         base_path = "/" + base_path
     app.config["BASE_PATH"] = base_path
 
-    # Cache-busting version for the app's own static assets (inpage.js and
-    # style.css). A content hash computed once at startup lets a browser
+    # Cache-busting version for shared and live-player scripts plus style.css.
+    # A content hash computed once at startup lets a browser
     # re-fetch when a file changes, without manual version bumps. Exposed to
     # templates as ``static_version``.
     def _static_version() -> str:
         chunks = []
-        for rel in ("static/js/inpage.js", "static/js/notify.js", "static/css/style.css"):
+        for rel in (
+            "static/js/inpage.js", "static/js/notify.js",
+            "static/js/live-player.js", "static/css/style.css",
+        ):
             p = _APP_DIR / rel
             if p.is_file():
                 chunks.append(p.read_bytes())
