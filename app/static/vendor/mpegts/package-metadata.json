@@ -1,0 +1,13 @@
+{
+  "name": "mpegts.js",
+  "version": "1.8.2",
+  "url": "https://registry.npmjs.org/mpegts.js/-/mpegts.js-1.8.2.tgz",
+  "integrity": "sha512-cZYMa5muASH55wrS6JK5IGkUqnCA96c0f+WdnW91jIK9s/N6NzjmTQDJNYg9A5u/G2Q5nj2b3w1Zwzze/9guxA==",
+  "sha256": "bda31748736a69cb610c2edf4623e633f1f4f47b5bda83668c8d287e51b0c3a8",
+  "vendoredSha256": "55605f3d2d9976ed1f3778eb87dfb0889dbff7da68822fe8d06c6a10bea3c333",
+  "localPatches": [
+    "Skip optional Enhanced FLV AV1 metadata packet type 4.",
+    "Emit complete media information after AV1 dimensions are parsed.",
+    "Remove AV1 OBU/keyframe debug console logging."
+  ]
+}

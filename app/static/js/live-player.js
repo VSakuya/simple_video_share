@@ -57,6 +57,7 @@
     var samples = [];
     var listeners = [];
     var statistics = {};
+    var media = {};
     var counts = { waiting: 0, stalled: 0, seeks: 0, reconnects: 0, networkErrors: 0 };
 
     function now() { return root.performance.now(); }
@@ -147,7 +148,8 @@
       buffering = false;
       stableSince = null;
       lastPosition = video.currentTime;
-      var library = root.flvjs;
+      media = {};
+      var library = root.mpegts;
       if (!library || !library.isSupported()) {
         notifyFatal('Live playback is not supported by this browser.');
         return;
@@ -155,6 +157,10 @@
       try {
         var active = library.createPlayer({ type: 'flv', url: options.url, isLive: true }, {
           enableStashBuffer: true,
+          // Our controller owns catch-up. Do not run a second vendor chaser.
+          liveBufferLatencyChasing: false,
+          liveBufferLatencyChasingOnPaused: false,
+          liveSync: false,
           lazyLoad: false,
           autoCleanupSourceBuffer: true,
           autoCleanupMaxBackwardDuration: 30,
@@ -174,7 +180,24 @@
             scheduleRetry();
           } else {
             record('media-error', { code: safeDetail });
-            notifyFatal('Live playback failed. Check browser codec support and reload the page.');
+            notifyFatal('Live codec or decoding is not supported. AV1 live playback requires an AV1-capable browser/device; use H.264 for compatibility.');
+          }
+        });
+        active.on(library.Events.MEDIA_INFO, function (info) {
+          if (!running || flv !== active) return;
+          var previousMedia = JSON.stringify(media);
+          ['videoCodec', 'audioCodec'].forEach(function (key) {
+            if (/^[A-Za-z0-9._-]{1,80}$/.test(String(info[key] || ''))) media[key] = info[key];
+          });
+          ['width', 'height', 'fps'].forEach(function (key) {
+            if (typeof info[key] === 'number' && isFinite(info[key])) media[key] = info[key];
+          });
+          if (JSON.stringify(media) !== previousMedia) record('media-info', Object.assign({}, media));
+          var mse = root.ManagedMediaSource || root.MediaSource;
+          if (media.videoCodec && media.videoCodec.indexOf('av01') === 0 &&
+              mse && typeof mse.isTypeSupported === 'function' &&
+              !mse.isTypeSupported('video/mp4; codecs="' + media.videoCodec + '"')) {
+            notifyFatal('This browser/device cannot decode this AV1 live stream. Use an AV1-capable browser or ask the streamer to use H.264.');
           }
         });
         active.on(library.Events.STATISTICS_INFO, function (info) {
@@ -323,6 +346,7 @@
       getDiagnostics: function () {
         return JSON.parse(JSON.stringify({
           active: running, retryAttempt: retryCount, policy: POLICY,
+          backend: 'mpegts.js', media: media,
           counts: counts, current: snapshot(), statistics: statistics,
           samples: samples, events: events
         }));

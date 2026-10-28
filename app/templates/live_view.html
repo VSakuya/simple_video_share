@@ -2,10 +2,9 @@
 {% block title %}{{ room['title'] }} — Live — Simple Video Share{% endblock %}
 {% block body_class %}page--live{% endblock %}
 {% block head %}
-<!-- DPlayer (§13.39, injects its own CSS/icons) + flv.js (§13.41, vendored,
-     exposes the global `flvjs`). Both are local; no CDN dependency. -->
+<!-- DPlayer UI + mpegts.js Enhanced FLV backend (§24), served locally. -->
 <script src="{{ url_for('static', filename='vendor/dplayer/DPlayer.min.js') }}?v={{ static_version }}"></script>
-<script src="{{ url_for('static', filename='vendor/flvjs/flv.min.js') }}?v={{ static_version }}"></script>
+<script src="{{ url_for('static', filename='vendor/mpegts/mpegts.min.js') }}?v={{ static_version }}"></script>
 <script src="{{ url_for('static', filename='js/live-player.js') }}?v={{ static_version }}"></script>
 {% endblock %}
 {% block content %}

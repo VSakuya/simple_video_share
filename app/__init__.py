@@ -86,6 +86,7 @@ def create_app() -> Flask:
         for rel in (
             "static/js/inpage.js", "static/js/notify.js",
             "static/js/live-player.js", "static/css/style.css",
+            "static/vendor/mpegts/mpegts.min.js",
         ):
             p = _APP_DIR / rel
             if p.is_file():

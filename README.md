@@ -24,7 +24,8 @@ worker.
   button.
 - Folders (nested tree, unlimited depth) and a tag system.
 - Live rooms (Node-Media-Server FLV streams behind Apache, on-air detection,
-  cover/title management, presence + persisted chat).
+  cover/title management, presence + persisted chat; H.264 and Enhanced-FLV AV1
+  playback in compatible browsers).
 - Watch Together rooms (synchronized playback, presence, ephemeral chat).
 - Admin console: videos / users / live rooms / tags / settings / server &
   client logs, plus storage import/export with checksum verification.
@@ -39,6 +40,7 @@ worker.
   runtime; never edited by hand).
 - Production: the bundled `000-default.conf` Apache vhost (HTTPS, reverse
   proxy to Waitress on `127.0.0.1:8080`, FLV playback guard).
+
 
 ## Run
 
