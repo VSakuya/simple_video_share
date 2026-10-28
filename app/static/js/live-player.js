@@ -283,7 +283,7 @@
       } else if (state.ahead <= POLICY.targetBuffer) {
         resetChase();
       } else if (!catchingUp) behindSince = null;
-      setRate(catchingUp ? (state.ahead > 5 ? 1.05 : 1.03) : 1);
+      setRate(catchingUp ? (state.ahead > 8 ? 1.25 : state.ahead > 5 ? 1.2 : 1.1) : 1);
     }
 
     function start() {
