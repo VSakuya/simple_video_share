@@ -332,9 +332,57 @@ async function resolveFolder() {
 }
 
 let processing = false; // guards against double-submit while the pipeline runs
+let retryUploadHandler = null;
+
+function ensureRetryButton() {
+  let btn = document.getElementById("upload-retry-button");
+  if (btn) return btn;
+  btn = document.createElement("button");
+  btn.id = "upload-retry-button";
+  btn.type = "button";
+  btn.className = "upload-submit upload-retry-btn hidden";
+  btn.textContent = "Retry upload";
+  btn.addEventListener("click", async () => {
+    if (!retryUploadHandler) return;
+    btn.disabled = true;
+    btn.textContent = "Retrying…";
+    try {
+      await retryUploadHandler();
+      retryUploadHandler = null;
+      btn.classList.add("hidden");
+      btn.disabled = false;
+      btn.textContent = "Retry upload";
+    } catch (err) {
+      const msg = err && err.message ? err.message : String(err);
+      clientLog("error", "Retry upload failed: " + msg);
+      btn.disabled = false;
+      btn.textContent = "Retry upload";
+    }
+  });
+  const panel = $("progress-panel");
+  if (panel) panel.appendChild(btn);
+  return btn;
+}
+
+function hideRetryButton() {
+  const btn = ensureRetryButton();
+  retryUploadHandler = null;
+  btn.classList.add("hidden");
+  btn.disabled = false;
+  btn.textContent = "Retry upload";
+}
+
+function showRetryButton(handler) {
+  const btn = ensureRetryButton();
+  retryUploadHandler = handler;
+  btn.classList.remove("hidden");
+  btn.disabled = false;
+  btn.textContent = "Retry upload";
+}
 
 function onUpload() {
   if (!sourceFile || processing) return;
+  hideRetryButton();
   processing = true;
   const button = $("upload-button");
   button.disabled = true; // Upload is unavailable until the pipeline finishes
@@ -374,6 +422,16 @@ function onUpload() {
       clientLog("error", "Upload pipeline failed: " + msg);
       progressStatus.textContent = "Error: " + msg;
       $("progress-speed").classList.add("hidden");
+      if (processedBlob) {
+        showRetryButton(async () => {
+          setProgress(0, "Retrying upload…");
+          if (processedBlob.size <= SEGMENT_THRESHOLD) {
+            await singleUpload();
+          } else {
+            await segmentedUpload();
+          }
+        });
+      }
       processing = false;
       button.disabled = false;
       button.textContent = "Upload";

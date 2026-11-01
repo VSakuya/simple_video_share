@@ -876,6 +876,20 @@ button:hover { filter: brightness(1.1); }
   margin: 24px auto 0;
 }
 .upload-submit:hover { filter: brightness(1.15); }
+.upload-retry-btn {
+  margin-top: 12px;
+  padding: 10px 20px;
+  font-size: 0.9rem;
+  border-radius: 999px;
+  display: inline-block;
+}
+.upload-queue__retry {
+  margin-left: 8px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  display: inline-block;
+}
 
 /* Prominent CTA: the clip-editor entry (upload page) and back-to-upload button
    (clip editor). A big pill button so both are obvious (bugs.md L40). */

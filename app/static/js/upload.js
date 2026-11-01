@@ -114,6 +114,47 @@ function setItemStatus(item, status, isError) {
   }
 }
 
+function ensureRetryButton(item) {
+  if (!item || !item.rowEl) return null;
+  if (item.retryBtn) return item.retryBtn;
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "upload-queue__retry";
+  btn.textContent = "Retry";
+  btn.addEventListener("click", () => { void retryQueuedItem(item); });
+  item.rowEl.appendChild(btn);
+  item.retryBtn = btn;
+  return btn;
+}
+
+function setItemRetryState(item, show) {
+  const btn = ensureRetryButton(item);
+  if (!btn) return;
+  btn.classList.toggle("hidden", !show);
+  btn.disabled = false;
+  btn.textContent = "Retry";
+}
+
+async function retryQueuedItem(item) {
+  const btn = ensureRetryButton(item);
+  if (!btn || !item.uploadState) return;
+  btn.disabled = true;
+  btn.textContent = "Retrying…";
+  setItemStatus(item, "Retrying upload…");
+  try {
+    await uploadVideo(item.uploadState.blob, item.uploadState.meta, ctx);
+    item.uploadState = null;
+    setItemStatus(item, "Done");
+    setItemRetryState(item, false);
+  } catch (err) {
+    const msg = err && err.message ? err.message : String(err);
+    setItemStatus(item, "Error: " + msg, true);
+    log("error", item.title + " retry failed: " + msg);
+    btn.disabled = false;
+    btn.textContent = "Retry";
+  }
+}
+
 // Add files (from a picker or drag-and-drop) to the queue. Non-video files are
 // ignored. Re-selecting the same files is fine — each pick is appended.
 function addFiles(files) {
@@ -187,13 +228,20 @@ async function processOne(item) {
   setItemStatus(item, "Extracting cover…");
   const cover = await extractCover(item.file, probe ? probe.duration : 0, ctx);
 
+  const meta = { title: item.title, description: "", folderId: folderInput.value || "", cover, info: outInfo, tagIds: selectedTagIds() };
+  item.uploadState = { blob, meta };
+  setItemRetryState(item, false);
+
   setItemStatus(item, "Uploading…");
-  await uploadVideo(
-    blob,
-    { title: item.title, description: "", folderId: folderInput.value || "", cover, info: outInfo, tagIds: selectedTagIds() },
-    ctx
-  );
-  setItemStatus(item, "Done");
+  try {
+    await uploadVideo(blob, meta, ctx);
+    item.uploadState = null;
+    setItemRetryState(item, false);
+    setItemStatus(item, "Done");
+  } catch (err) {
+    setItemRetryState(item, true);
+    throw err;
+  }
 }
 
 let successTimer = null;
@@ -249,6 +297,7 @@ async function startQueue() {
     } catch (err) {
       const msg = err && err.message ? err.message : String(err);
       setItemStatus(item, "Error: " + msg, true);
+      if (item.uploadState) setItemRetryState(item, true);
       log("error", item.title + " failed: " + msg);
       failCount++;
     }
