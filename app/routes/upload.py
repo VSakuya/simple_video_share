@@ -192,7 +192,7 @@ def submit() -> Any:
 # Active upload sessions cache. Metadata is also persisted under
 # videos/.segments/<token>/session.json so interrupted uploads can resume.
 _seg_sessions: dict[str, dict[str, Any]] = {}
-SEGMENT_SIZE = 512 * 1024 * 1024  # 512 MB per part (client-side policy)
+SEGMENT_SIZE = 64 * 1024 * 1024  # 64 MB per part to stay well under reverse-proxy limits
 
 
 @upload_bp.route("/seg/start", methods=["POST"])
