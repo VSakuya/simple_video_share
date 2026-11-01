@@ -31,8 +31,10 @@ import { FFmpeg } from "./ffmpeg/lib/index.js";
 // e.g. /video as well as at the root.
 const SVS_BASE = (typeof window !== "undefined" && window.SVS_BASE) ? window.SVS_BASE : "";
 
-const SEGMENT_THRESHOLD = 1024 * 1024 * 1024; // split when final size > 1 GB
+const SEGMENT_THRESHOLD = 256 * 1024 * 1024; // prefer segmented upload above 256 MB
 const SEGMENT_SIZE = 512 * 1024 * 1024; // 512 MB per part
+const SEGMENT_RETRY_MAX = 3;
+const SEGMENT_RETRY_BASE_MS = 1200;
 const MAX_HEIGHT = 1080;
 const MAX_FPS = 60;
 // Bitrate cap (kbps): the admin "default bitrate" setting, exposed by the page
@@ -646,6 +648,49 @@ function appendTags(fd, meta) {
   if (meta.tagIds) for (const tid of meta.tagIds) fd.append("tags", String(tid));
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isRetriableUploadError(err) {
+  const msg = err && err.message ? String(err.message) : "";
+  if (msg.includes("Network error during upload")) return true;
+  return /\bUpload failed \((408|429|500|502|503|504)\)\b/.test(msg);
+}
+
+async function retryUpload(op, label, log) {
+  let lastErr = null;
+  for (let attempt = 1; attempt <= SEGMENT_RETRY_MAX; attempt++) {
+    try {
+      return await op();
+    } catch (err) {
+      lastErr = err;
+      if (!isRetriableUploadError(err) || attempt >= SEGMENT_RETRY_MAX) break;
+      const waitMs = SEGMENT_RETRY_BASE_MS * attempt;
+      if (log) log("warn", label + " failed (" + (err.message || err) + "), retry " + (attempt + 1) + "/" + SEGMENT_RETRY_MAX + " in " + waitMs + " ms");
+      await sleep(waitMs);
+    }
+  }
+  throw lastErr || new Error(label + " failed");
+}
+
+function resumeKey(meta, sizeBytes, totalParts) {
+  const tagSig = (meta.tagIds || []).join(",");
+  return "svs-seg-resume-v1|" + [meta.title || "", String(meta.folderId || ""), String(sizeBytes), String(totalParts), tagSig].join("|");
+}
+
+function loadResumeToken(key) {
+  try { return localStorage.getItem(key) || ""; } catch { return ""; }
+}
+
+function saveResumeToken(key, token) {
+  try { localStorage.setItem(key, token); } catch { /* localStorage unavailable */ }
+}
+
+function clearResumeToken(key) {
+  try { localStorage.removeItem(key); } catch { /* localStorage unavailable */ }
+}
+
 export async function uploadVideo(blob, meta, ctx) {
   const log = ctx.log;
   if (blob.size <= SEGMENT_THRESHOLD) {
@@ -659,36 +704,61 @@ export async function uploadVideo(blob, meta, ctx) {
     addMeta(fd, meta.info);
     log("info", "Uploading (single) " + fmtMB(blob.size));
     ctx.setProgress(0, "Uploading…");
-    await xhrPost(SVS_BASE + "/upload/submit", fd, makeProgressCb(0, blob.size, ctx));
-    log("info", "Upload accepted by server");
-    if (ctx.progressSpeed) ctx.progressSpeed.classList.add("hidden");
-    ctx.setProgress(1, "Done");
-    return;
+    try {
+      await xhrPost(SVS_BASE + "/upload/submit", fd, makeProgressCb(0, blob.size, ctx));
+      log("info", "Upload accepted by server");
+      if (ctx.progressSpeed) ctx.progressSpeed.classList.add("hidden");
+      ctx.setProgress(1, "Done");
+      return;
+    } catch (err) {
+      if (!isRetriableUploadError(err)) throw err;
+      log("warn", "Single upload failed (" + (err.message || err) + "); retrying with segmented upload.");
+    }
   }
   const totalParts = Math.ceil(blob.size / SEGMENT_SIZE);
+  const rKey = resumeKey(meta, blob.size, totalParts);
+  const oldToken = loadResumeToken(rKey);
   log("info", "Uploading (segmented) " + totalParts + " part(s) of " + fmtMB(blob.size));
-  const startRes = await fetch(SVS_BASE + "/upload/seg/start", {
-    method: "POST",
-    headers: { "X-Requested-With": "XMLHttpRequest" },
-    body: new URLSearchParams({
-      title: meta.title,
-      total_parts: String(totalParts),
-      expected_size: String(blob.size),
-      folder_id: meta.folderId || "",
-    }),
-  });
-  const start = await startRes.json();
-  if (!start.ok) throw new Error(start.error || "seg_start failed");
+  const start = await retryUpload(
+    async () => {
+      const res = await fetch(SVS_BASE + "/upload/seg/start", {
+        method: "POST",
+        headers: { "X-Requested-With": "XMLHttpRequest" },
+        body: new URLSearchParams({
+          title: meta.title,
+          total_parts: String(totalParts),
+          expected_size: String(blob.size),
+          folder_id: meta.folderId || "",
+          resume_token: oldToken,
+        }),
+      });
+      let j = null;
+      try { j = await res.json(); } catch { /* non-JSON body */ }
+      if (res.status >= 200 && res.status < 300 && j && j.ok) return j;
+      throw new Error((j && j.error) || "Upload failed (" + res.status + ")");
+    },
+    "seg_start",
+    log
+  );
   const token = start.token;
+  saveResumeToken(rKey, token);
+  const uploaded = Array.isArray(start.uploaded_parts) ? start.uploaded_parts : [];
+  const done = new Set(uploaded.map((x) => Number(x)).filter((x) => Number.isInteger(x) && x >= 0 && x < totalParts));
+  if (done.size) log("info", "Resuming segmented upload from server checkpoint (" + done.size + "/" + totalParts + " part(s) already on server).");
   const totalBytes = blob.size;
   for (let i = 0; i < totalParts; i++) {
+    if (done.has(i)) continue;
     const part = blob.slice(i * SEGMENT_SIZE, (i + 1) * SEGMENT_SIZE);
     const fd = new FormData();
     fd.append("token", token);
     fd.append("part_index", String(i));
     fd.append("part", part, "part_" + i + ".bin");
     ctx.setProgress(i / totalParts, "Uploading segment " + (i + 1) + "/" + totalParts + "…");
-    await xhrPost(SVS_BASE + "/upload/seg/part", fd, makeProgressCb(i * SEGMENT_SIZE, totalBytes, ctx));
+    await retryUpload(
+      () => xhrPost(SVS_BASE + "/upload/seg/part", fd, makeProgressCb(i * SEGMENT_SIZE, totalBytes, ctx)),
+      "segment " + (i + 1) + "/" + totalParts,
+      log
+    );
   }
   const fd = new FormData();
   fd.append("token", token);
@@ -697,7 +767,8 @@ export async function uploadVideo(blob, meta, ctx) {
   appendTags(fd, meta);
   addMeta(fd, meta.info);
   ctx.setProgress(1, "Finalizing…");
-  await xhrPost(SVS_BASE + "/upload/seg/finish", fd, () => {});
+  await retryUpload(() => xhrPost(SVS_BASE + "/upload/seg/finish", fd, () => {}), "seg_finish", log);
+  clearResumeToken(rKey);
   if (ctx.progressSpeed) ctx.progressSpeed.classList.add("hidden");
   ctx.setProgress(1, "Done");
 }

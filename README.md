@@ -17,8 +17,8 @@ worker.
 - Multi-user accounts (admin-managed; no self-registration) with avatars and
   forced first-login password change.
 - Upload queue with client-side transcode (AV1/H.264 caps: 1080p / 60 fps /
-  admin-set bitrate), an optional QuickSplit-style clip editor, and segmented
-  upload for files over 1 GB.
+  admin-set bitrate), an optional QuickSplit-style clip editor, and resilient
+  segmented upload with resume/retry support for large or unstable transfers.
 - Watch page with HTTP Range streaming, cache-on-demand download from Google
   Drive, comments (two-level replies, kaomoji welcome), tags, and a Download
   button.

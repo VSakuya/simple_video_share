@@ -41,5 +41,4 @@ testing/*
 HANDOFF_mediabunny.md
 *.conf
 documents/PROJECT_PROGRESS.md
-documents/*review*
-documents/*requirement*
+documents/*

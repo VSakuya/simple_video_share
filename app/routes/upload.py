@@ -14,10 +14,13 @@ Flow (see project_requirements.md, Scenario 1):
 """
 
 import hashlib
+import json
 import logging
 import os
+import re
 import shutil
 import sys
+import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -183,11 +186,11 @@ def submit() -> Any:
 
 
 # ---------------------------------------------------------------------------
-# Segmented upload (final MP4 > 1 GB) — project_requirements.md R4
+# Segmented upload (resumable chunked path)
 # ---------------------------------------------------------------------------
 
-# In-memory upload sessions (a restart mid-upload drops the session; the
-# orphaned part directory is removed by the next finish, or by hand).
+# Active upload sessions cache. Metadata is also persisted under
+# videos/.segments/<token>/session.json so interrupted uploads can resume.
 _seg_sessions: dict[str, dict[str, Any]] = {}
 SEGMENT_SIZE = 512 * 1024 * 1024  # 512 MB per part (client-side policy)
 
@@ -203,25 +206,51 @@ def seg_start() -> Any:
     total_parts = _optional_int(request.form.get("total_parts")) or 0
     expected_size = _optional_int(request.form.get("expected_size")) or 0
     folder_id = _optional_int(request.form.get("folder_id"))
+    resume_token = (request.form.get("resume_token") or "").strip()
     if not _folder_ok(me["id"], bool(me.get("is_admin")), folder_id):
         return jsonify(ok=False, error="Unknown folder."), 400
     if total_parts <= 0:
         return jsonify(ok=False, error="total_parts is required"), 400
-
-    base_dir = str(os.path.dirname(str(current_app.config["VIDEOS_DIR"])))
+    videos_dir = Path(current_app.config["VIDEOS_DIR"])
+    base_dir = str(os.path.dirname(str(videos_dir)))
     ok, msg = _check_space(base_dir, expected_size)
     if not ok:
         return jsonify(ok=False, error=msg), 400
 
+    if _valid_seg_token(resume_token):
+        resumed = _get_seg_session(videos_dir, resume_token)
+        if resumed is not None:
+            if resumed["user_id"] != me["id"]:
+                return jsonify(ok=False, error="Session belongs to another user."), 403
+            if _seg_session_matches(
+                resumed, title, total_parts, expected_size, folder_id
+            ):
+                uploaded_parts = _uploaded_parts(
+                    _seg_dir(videos_dir, resume_token), resumed["total_parts"]
+                )
+                return jsonify(
+                    ok=True,
+                    token=resume_token,
+                    segment_size=SEGMENT_SIZE,
+                    resumed=True,
+                    uploaded_parts=uploaded_parts,
+                )
+
     token = uuid.uuid4().hex
-    _seg_sessions[token] = {
+    sess = {
         "user_id": me["id"],
         "title": title,
         "total_parts": total_parts,
         "expected_size": expected_size,
         "folder_id": folder_id,
+        "created_at": int(time.time()),
     }
-    return jsonify(ok=True, token=token, segment_size=SEGMENT_SIZE)
+    _seg_sessions[token] = sess
+    _save_seg_session(videos_dir, token, sess)
+    return jsonify(
+        ok=True, token=token, segment_size=SEGMENT_SIZE, resumed=False,
+        uploaded_parts=[],
+    )
 
 
 @upload_bp.route("/seg/part", methods=["POST"])
@@ -232,15 +261,18 @@ def seg_part() -> Any:
     assert me is not None
     token = request.form.get("token", "")
     part_index = _optional_int(request.form.get("part_index"))
-    sess = _seg_sessions.get(token)
+    videos_dir = Path(current_app.config["VIDEOS_DIR"])
+    sess = _get_seg_session(videos_dir, token)
     if sess is None or part_index is None or part_index < 0:
         return jsonify(ok=False, error="Unknown session"), 400
     if sess["user_id"] != me["id"]:
         return jsonify(ok=False, error="Session belongs to another user."), 403
+    if part_index >= sess["total_parts"]:
+        return jsonify(ok=False, error="part_index out of range"), 400
     part_file = request.files.get("part")
     if part_file is None:
         return jsonify(ok=False, error="No part received"), 400
-    seg_dir = Path(current_app.config["VIDEOS_DIR"]) / ".segments" / token
+    seg_dir = _seg_dir(videos_dir, token)
     seg_dir.mkdir(parents=True, exist_ok=True)
     dest = seg_dir / ("part_%05d" % part_index)
     with dest.open("wb") as fh:
@@ -255,18 +287,21 @@ def seg_finish() -> Any:
     me = current_user()
     assert me is not None
     token = request.form.get("token", "")
-    sess = _seg_sessions.get(token)
+    videos_dir = Path(current_app.config["VIDEOS_DIR"])
+    sess = _get_seg_session(videos_dir, token)
     if sess is None:
         return jsonify(ok=False, error="Unknown session"), 400
     if sess["user_id"] != me["id"]:
         return jsonify(ok=False, error="Session belongs to another user."), 403
-    seg_dir = Path(current_app.config["VIDEOS_DIR"]) / ".segments" / token
+    seg_dir = _seg_dir(videos_dir, token)
     parts = sorted(seg_dir.glob("part_*")) if seg_dir.exists() else []
     if len(parts) != sess["total_parts"]:
-        _rmtree_quiet(seg_dir)
-        _seg_sessions.pop(token, None)
         return (
-            jsonify(ok=False, error="Incomplete upload: %d/%d parts" % (len(parts), sess["total_parts"]))
+            jsonify(
+                ok=False,
+                error="Incomplete upload: %d/%d parts" % (len(parts), sess["total_parts"]),
+                uploaded_parts=_uploaded_parts(seg_dir, sess["total_parts"]),
+            )
         ), 400
 
     cover_file = request.files.get("cover")
@@ -275,7 +310,6 @@ def seg_finish() -> Any:
     if cover_file is not None:
         cover_name = storage.save_cover(cover_file, covers_dir, current_app.config)
 
-    videos_dir = Path(current_app.config["VIDEOS_DIR"])
     video_name = _unique_video_name(sess["title"], videos_dir)
     final_path = videos_dir / video_name
     with final_path.open("wb") as out:
@@ -283,9 +317,6 @@ def seg_finish() -> Any:
             with p.open("rb") as fh:
                 shutil.copyfileobj(fh, out)
     size_bytes = final_path.stat().st_size
-
-    _rmtree_quiet(seg_dir)
-    _seg_sessions.pop(token, None)
 
     video_id, err = _register_and_enqueue(
         sess["user_id"], sess["title"], video_name, cover_name, size_bytes,
@@ -297,6 +328,7 @@ def seg_finish() -> Any:
             _remove_quiet(os.path.join(str(covers_dir), cover_name))
         return jsonify(ok=False, error=err or "Could not register the video."), 400
 
+    _remove_seg_session(videos_dir, token)
     return jsonify(ok=True, title=sess["title"], video_id=video_id)
 
 
@@ -430,6 +462,94 @@ def _unique_video_name(title: str, videos_dir: Path) -> str:
 def _rmtree_quiet(path: Path) -> None:
     if path.exists():
         shutil.rmtree(path, ignore_errors=True)
+
+
+def _valid_seg_token(token: str) -> bool:
+    return bool(re.fullmatch(r"[0-9a-f]{32}", token or ""))
+
+
+def _seg_dir(videos_dir: Path, token: str) -> Path:
+    return videos_dir / ".segments" / token
+
+
+def _seg_meta_path(videos_dir: Path, token: str) -> Path:
+    return _seg_dir(videos_dir, token) / "session.json"
+
+
+def _save_seg_session(videos_dir: Path, token: str, sess: dict[str, Any]) -> None:
+    seg_dir = _seg_dir(videos_dir, token)
+    seg_dir.mkdir(parents=True, exist_ok=True)
+    meta_path = _seg_meta_path(videos_dir, token)
+    with meta_path.open("w", encoding="utf-8") as fh:
+        json.dump(sess, fh)
+
+
+def _load_seg_session(videos_dir: Path, token: str) -> dict[str, Any] | None:
+    if not _valid_seg_token(token):
+        return None
+    meta_path = _seg_meta_path(videos_dir, token)
+    if not meta_path.exists():
+        return None
+    try:
+        with meta_path.open("r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    if not all(k in data for k in ("user_id", "title", "total_parts", "expected_size", "folder_id")):
+        return None
+    _seg_sessions[token] = data
+    return data
+
+
+def _get_seg_session(videos_dir: Path, token: str) -> dict[str, Any] | None:
+    if not _valid_seg_token(token):
+        return None
+    sess = _seg_sessions.get(token)
+    if sess is not None:
+        return sess
+    return _load_seg_session(videos_dir, token)
+
+
+def _seg_session_matches(
+    sess: dict[str, Any],
+    title: str,
+    total_parts: int,
+    expected_size: int,
+    folder_id: int | None,
+) -> bool:
+    try:
+        sess_total_parts = int(sess.get("total_parts", -1))
+        sess_expected_size = int(sess.get("expected_size", -1))
+    except (TypeError, ValueError):
+        return False
+    return (
+        str(sess.get("title", "")) == title
+        and sess_total_parts == total_parts
+        and sess_expected_size == expected_size
+        and _optional_int(str(sess.get("folder_id"))) == folder_id
+    )
+
+
+def _uploaded_parts(seg_dir: Path, total_parts: int) -> list[int]:
+    out: list[int] = []
+    if not seg_dir.exists():
+        return out
+    for part in seg_dir.glob("part_*"):
+        m = re.fullmatch(r"part_(\d{5})", part.name)
+        if not m:
+            continue
+        idx = int(m.group(1))
+        if 0 <= idx < total_parts:
+            out.append(idx)
+    out.sort()
+    return out
+
+
+def _remove_seg_session(videos_dir: Path, token: str) -> None:
+    _seg_sessions.pop(token, None)
+    _rmtree_quiet(_seg_dir(videos_dir, token))
 
 
 # ---------------------------------------------------------------------------

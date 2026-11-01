@@ -13,8 +13,8 @@
 //      (no silent pass-through of a non-compliant original, §13.13).
 //   3. Extract a cover from the 60s frame (mediabunny WebCodecs decode, else
 //      an HTML5 <video> seek) or use a user-provided one.
-//   4. Upload: single POST when the final file is <= 1 GB, otherwise split it
-//      into <= 512 MB segments via /upload/seg/* (R4).
+//   4. Upload: single POST for small files, with automatic fallback to
+//      resumable segmented upload when the request fails at the gateway.
 
 import { FFmpeg } from "./ffmpeg/lib/index.js";
 
@@ -24,8 +24,10 @@ import { FFmpeg } from "./ffmpeg/lib/index.js";
 // e.g. /video as well as at the root.
 const SVS_BASE = (typeof window !== "undefined" && window.SVS_BASE) ? window.SVS_BASE : "";
 
-const SEGMENT_THRESHOLD = 1024 * 1024 * 1024; // split when final size > 1 GB
+const SEGMENT_THRESHOLD = 256 * 1024 * 1024; // prefer segmented upload above 256 MB
 const SEGMENT_SIZE = 512 * 1024 * 1024; // 512 MB per part
+const SEGMENT_RETRY_MAX = 3;
+const SEGMENT_RETRY_BASE_MS = 1200;
 const MAX_HEIGHT = 1080;
 const MAX_FPS = 60;
 // Per-upload FPS cap the user picks in the form (clamped to MAX_FPS). Read live
@@ -1110,6 +1112,59 @@ function xhrPost(url, body, onProgress) {
   });
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isRetriableUploadError(err) {
+  const msg = err && err.message ? String(err.message) : "";
+  if (msg.includes("Network error during upload")) return true;
+  return /\bUpload failed \((408|429|500|502|503|504)\)\b/.test(msg);
+}
+
+async function retryUpload(op, label) {
+  let lastErr = null;
+  for (let attempt = 1; attempt <= SEGMENT_RETRY_MAX; attempt++) {
+    try {
+      return await op();
+    } catch (err) {
+      lastErr = err;
+      if (!isRetriableUploadError(err) || attempt >= SEGMENT_RETRY_MAX) break;
+      const waitMs = SEGMENT_RETRY_BASE_MS * attempt;
+      clientLog("warn", label + " failed (" + (err.message || err) + "), retry " + (attempt + 1) + "/" + SEGMENT_RETRY_MAX + " in " + waitMs + " ms");
+      await sleep(waitMs);
+    }
+  }
+  throw lastErr || new Error(label + " failed");
+}
+
+function selectedTagIds() {
+  const el = document.querySelector(".tag-input");
+  return el ? SVSTagInput.get(el) : [];
+}
+
+function resumeKey(sizeBytes, totalParts) {
+  return "svs-seg-resume-v1|" + [
+    titleInput.value || "",
+    String(folderInput.value || ""),
+    String(sizeBytes),
+    String(totalParts),
+    selectedTagIds().join(","),
+  ].join("|");
+}
+
+function loadResumeToken(key) {
+  try { return localStorage.getItem(key) || ""; } catch { return ""; }
+}
+
+function saveResumeToken(key, token) {
+  try { localStorage.setItem(key, token); } catch { /* localStorage unavailable */ }
+}
+
+function clearResumeToken(key) {
+  try { localStorage.removeItem(key); } catch { /* localStorage unavailable */ }
+}
+
 // Build the XHR onProgress handler for one request. `offset` is the number of
 // bytes already sent before this request (segmented uploads) and `total` is
 // the whole-file size, so the bar reflects overall progress. Speed is the
@@ -1150,38 +1205,59 @@ async function singleUpload() {
   addTags(fd);
   clientLog("info", "Uploading (single) " + fmtMB(processedBlob.size));
   setProgress(0, "Uploading…");
-  await xhrPost(SVS_BASE + "/upload/submit", fd, makeProgressCb(0, processedBlob.size));
-  clientLog("info", "Upload accepted by server");
-  $("progress-speed").classList.add("hidden");
-  setProgress(1, "Done");
+  try {
+    await xhrPost(SVS_BASE + "/upload/submit", fd, makeProgressCb(0, processedBlob.size));
+    clientLog("info", "Upload accepted by server");
+    $("progress-speed").classList.add("hidden");
+    setProgress(1, "Done");
+  } catch (err) {
+    if (!isRetriableUploadError(err)) throw err;
+    clientLog("warn", "Single upload failed (" + (err.message || err) + "); retrying with segmented upload.");
+    await segmentedUpload();
+  }
 }
 
 async function segmentedUpload() {
   const totalParts = Math.ceil(processedBlob.size / SEGMENT_SIZE);
+  const rKey = resumeKey(processedBlob.size, totalParts);
+  const oldToken = loadResumeToken(rKey);
   clientLog("info", "Uploading (segmented) " + totalParts + " part(s) of " + fmtMB(processedBlob.size));
-  const startRes = await fetch(SVS_BASE + "/upload/seg/start", {
-    method: "POST",
-    headers: { "X-Requested-With": "XMLHttpRequest" },
-    body: new URLSearchParams({
-      title: titleInput.value,
-      total_parts: String(totalParts),
-      expected_size: String(processedBlob.size),
-      folder_id: folderInput.value || "",
-    }),
-  });
-  const start = await startRes.json();
-  if (!start.ok) throw new Error(start.error || "seg_start failed");
+  const start = await retryUpload(async () => {
+    const res = await fetch(SVS_BASE + "/upload/seg/start", {
+      method: "POST",
+      headers: { "X-Requested-With": "XMLHttpRequest" },
+      body: new URLSearchParams({
+        title: titleInput.value,
+        total_parts: String(totalParts),
+        expected_size: String(processedBlob.size),
+        folder_id: folderInput.value || "",
+        resume_token: oldToken,
+      }),
+    });
+    let j = null;
+    try { j = await res.json(); } catch { /* non-JSON body */ }
+    if (res.status >= 200 && res.status < 300 && j && j.ok) return j;
+    throw new Error((j && j.error) || "Upload failed (" + res.status + ")");
+  }, "seg_start");
   const token = start.token;
+  saveResumeToken(rKey, token);
+  const uploaded = Array.isArray(start.uploaded_parts) ? start.uploaded_parts : [];
+  const done = new Set(uploaded.map((x) => Number(x)).filter((x) => Number.isInteger(x) && x >= 0 && x < totalParts));
+  if (done.size) clientLog("info", "Resuming segmented upload from server checkpoint (" + done.size + "/" + totalParts + " part(s) already on server).");
   const totalBytes = processedBlob.size;
 
   for (let i = 0; i < totalParts; i++) {
+    if (done.has(i)) continue;
     const part = processedBlob.slice(i * SEGMENT_SIZE, (i + 1) * SEGMENT_SIZE);
     const fd = new FormData();
     fd.append("token", token);
     fd.append("part_index", String(i));
     fd.append("part", part, "part_" + i + ".bin");
     setProgress(i / totalParts, "Uploading segment " + (i + 1) + "/" + totalParts + "…");
-    await xhrPost(SVS_BASE + "/upload/seg/part", fd, makeProgressCb(i * SEGMENT_SIZE, totalBytes));
+    await retryUpload(
+      () => xhrPost(SVS_BASE + "/upload/seg/part", fd, makeProgressCb(i * SEGMENT_SIZE, totalBytes)),
+      "segment " + (i + 1) + "/" + totalParts
+    );
   }
 
   const fd = new FormData();
@@ -1191,7 +1267,8 @@ async function segmentedUpload() {
   addMeta(fd);
   addTags(fd);
   setProgress(1, "Finalizing…");
-  await xhrPost(SVS_BASE + "/upload/seg/finish", fd, () => {});
+  await retryUpload(() => xhrPost(SVS_BASE + "/upload/seg/finish", fd, () => {}), "seg_finish");
+  clearResumeToken(rKey);
   $("progress-speed").classList.add("hidden");
   setProgress(1, "Done");
 }
