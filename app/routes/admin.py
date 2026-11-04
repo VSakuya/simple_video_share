@@ -70,6 +70,27 @@ def _is_ajax() -> bool:
     return request.headers.get("X-Requested-With") == "XMLHttpRequest"
 
 
+def _video_action_answer(ok: bool, message: str, **extra: Any) -> Any:
+    """Answer one Videos-table action both ways (16.1).
+
+    ``data-async`` forms get JSON so the table row updates in place; a plain form
+    (or a browser without async.js) gets the flash + redirect every other admin
+    action uses. ``extra`` carries whatever the page handler needs to render -
+    e.g. how many bytes a cache drop just gave back.
+    """
+    if _is_ajax():
+        payload: dict[str, Any] = {"ok": ok, "message": message}
+        payload.update(extra)
+        return (jsonify(payload), 200 if ok else 400)
+    flash(message, "success" if ok else "error")
+    return redirect(url_for("admin.videos"))
+
+
+def _fmt_mb(n: int) -> str:
+    """Bytes as the MB string the admin table speaks in (rounds to 1 decimal)."""
+    return "%.1f MB" % (max(0, int(n)) / 1048576.0)
+
+
 def _storage_stats() -> dict[str, Any]:
     """Disk / drive / cache numbers shown on the settings subpage (§15.5)."""
     base_dir = os.path.dirname(str(current_app.config["VIDEOS_DIR"]))
@@ -477,6 +498,59 @@ def pin_video(video_id: int) -> Any:
     pinned = 0 if video.get("is_pinned") else 1
     db.update_video(video_id, is_pinned=pinned)
     return jsonify(ok=True, pinned=pinned, video_id=video_id)
+
+
+@admin_bp.route("/videos/<int:video_id>/cache/delete", methods=["POST"])
+@admin_required
+def delete_video_cache(video_id: int) -> Any:
+    """Drop the local cache of one video - the MP4 copy and its HLS tree (§35).
+
+    Until now the Videos table had one destructive action: Delete, which removes the
+    Drive file, the row and the local copy together. Disk is the scarce resource on
+    this server, so freeing one video worth of it has to be possible without deleting
+    the video: Drive keeps the original, and the watch page can pull it back again.
+
+    ``storage.cache_drop_blocker`` owns the two rules that protect the original (no
+    Drive copy, upload in flight). The guard only this page can know is the third one:
+    a stream job writing inside the very tree about to be removed.
+    """
+    from .. import hls
+
+    video = db.get_video_by_id(video_id)
+    if video is None:
+        return _video_action_answer(False, "Video not found.", video_id=video_id)
+    state = str(video.get("stream_state") or hls.STATE_NONE)
+    if state in (hls.STATE_BUILDING, hls.STATE_REPAIRING):
+        return _video_action_answer(
+            False,
+            "A stream job is running on this video: wait for the badge to settle "
+            "before dropping its cache.",
+            video_id=video_id,
+            stream_state=state,
+        )
+    blocker = storage.cache_drop_blocker(video)
+    if blocker:
+        return _video_action_answer(False, blocker, video_id=video_id)
+    base_dir = str(Path(current_app.config["VIDEOS_DIR"]).parent)
+    footprint = storage.cache_footprint(base_dir, video)
+    if footprint == 0 and not (video.get("local_filename") or video.get("stream_dir")):
+        return _video_action_answer(
+            True,
+            "Nothing was cached on this server for that video.",
+            video_id=video_id,
+            cached=False,
+        )
+    freed = storage.drop_local_cache(base_dir, video)
+    logger.info("admin: id=%s local cache dropped (%d bytes freed)", video_id, freed)
+    return _video_action_answer(
+        True,
+        "Cache dropped: %s freed. The Google Drive copy and this row are untouched."
+        % _fmt_mb(freed),
+        video_id=video_id,
+        freed_bytes=freed,
+        cached=False,
+        stream_state=hls.STATE_NONE,
+    )
 
 
 @admin_bp.route("/export")

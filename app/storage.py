@@ -197,7 +197,7 @@ def enforce_cache_limit(
     return evicted
 
 
-def _evict(video: dict, base_dir: str, app_config: dict) -> None:
+def _evict(video: dict, base_dir: str, app_config: Optional[dict] = None) -> None:
     """Delete a video local cache - the MP4 copy AND its stream tree (Drive remains).
 
     A stream tree is a directory, so it needs rmtree (unlink() on a directory
@@ -230,6 +230,52 @@ def _evict(video: dict, base_dir: str, app_config: dict) -> None:
         stream_dir=None,
         stream_state="none",
     )
+
+
+def cache_footprint(base_dir: str, video: dict) -> int:
+    """Bytes one cache entry occupies: the local MP4 copy plus its stream tree.
+
+    ``base_dir`` is the storage directory (the parent of ``videos/``), the same
+    convention ``_evict`` works from, so the two can never disagree about where an
+    entry lives. A row whose file is already gone contributes 0.
+    """
+    videos_dir = str(Path(base_dir) / "videos")
+    return (
+        _entry_bytes(videos_dir, video.get("local_filename"))
+        + _entry_bytes(videos_dir, video.get("stream_dir"))
+    )
+
+
+def cache_drop_blocker(video: dict) -> Optional[str]:
+    """Reason this cache entry must not be dropped, or None when it may be.
+
+    The rule every cache removal already follows, stated once so a button cannot
+    invent a looser one: a local copy may only be thrown away when Google Drive
+    holds the original, and never while that upload is still in progress.
+    """
+    if not video.get("google_drive_file_id"):
+        return (
+            "No Google Drive copy of this video, so its local file is the only "
+            "copy. Delete the video instead, or wait for the upload to finish."
+        )
+    if video.get("status") == "uploading":
+        return "The Google Drive upload of this video is still in progress."
+    return None
+
+
+def drop_local_cache(base_dir: str, video: dict) -> int:
+    """Delete the local cache of one video (MP4 copy and HLS tree), flags included.
+
+    The admin-facing form of ``_evict``: the same removal and the same flag reset,
+    but measured first so the page can report how much disk it just gave back. The
+    Drive file and the DB row are untouched, which is exactly what lets the watch
+    page pull the video back from Drive.
+
+    Returns the bytes freed (0 when the row had no files on disk).
+    """
+    freed = cache_footprint(base_dir, video)
+    _evict(video, base_dir)
+    return freed
 
 
 def is_locally_playable(videos_dir, video: dict) -> bool:

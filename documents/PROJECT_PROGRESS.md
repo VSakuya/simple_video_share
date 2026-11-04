@@ -4677,3 +4677,83 @@ in this session and not registered as approved: an orphan sweep (admin listing +
 observed playing AV1 over HLS, no real ~1 GB repair has been run, Watch Together over HLS has had no
 two-browser session, and the new guards have only been exercised against 20-30 s fixtures. This session
 changed code on the dev box only.
+
+## 35. Admin 'Drop cache' - free one video's disk without deleting the video (Session: 2026-11-04 18:02:25)
+
+Owner request: the Videos table had exactly one destructive action - Delete - which removes the Drive
+file, the row and the local copy together. Dropping the local cache of a single video has to be its
+own button: it is the manual counterpart of the LRU eviction 34.1 made safe, and on a 10 GB disk it is
+the difference between refusing a repair and running it.
+
+### 35.0 Pending Changes
+
+| # | File(s) | Change | Why | Blast radius |
+|---|---------|--------|-----|--------------|
+| 35.1 | `app/storage.py` | new public `cache_footprint(base_dir, video)` (bytes one video's MP4 plus stream tree occupy, built on the existing `_entry_bytes`), `cache_drop_blocker(video)` (the Drive-copy / mid-upload rule) and `drop_local_cache(base_dir, video)` returning the bytes freed; `_evict` gains an optional `app_config` so the public path reuses the same removal code | the eviction path already knows how to delete a folder-shaped cache entry correctly (rmtree on the tree, prune the empty `<hash>/`, clear `local_filename` / `stream_dir` / `stream_state`). Copying it for a button is how the two drift apart | storage |
+| 35.2 | `app/routes/admin.py` | new `POST /admin/videos/<id>/cache/delete` (`delete_video_cache`) plus a `_video_action_answer` helper so the action answers JSON to the async table and flash + redirect to a plain form | 16.1 rule: a mutating admin action updates the table without a page reload | admin routes |
+| 35.3 | `app/templates/admin_videos.html` | a Drop cache form (`data-async data-async-action="drop-cache"`) whose confirm line names what survives, `data-cached` and `data-stream-state` hooks on the two state cells, and a page handler that flips them to no / none and disables the button | the row has to show the new truth immediately, and the confirm dialog is where the admin learns that Drive, the row, the cover and the comments are untouched | admin videos table |
+| 35.4 | `testing/probe_admin_cache_drop.py` (new) | build a foldered cache entry, drop it through the route, assert the tree is gone, the flags are cleared, the Drive id and the row survive and the freed bytes are reported; assert the three refusals (no Drive copy, `status='uploading'`, `stream_state` building / repairing) | those refusals are the only thing standing between this button and a deleted original | testing |
+
+Refusals chosen for 35.1/35.2: no `google_drive_file_id` (the local file would then be the only copy -
+the same rule `hls._drop_local_source` enforces), `status='uploading'` (the file is being written right
+now), and `stream_state` in `building` / `repairing` (ffmpeg owns that tree and would be writing into a
+directory being rmtree'd).
+
+### 35.1 Change Log (2026-11-04 18:09:10)
+
+- **35.1** `app/storage.py`: three public helpers built on the eviction code -
+  `cache_footprint(base_dir, video)` (sums `_entry_bytes` over `local_filename` and
+  `stream_dir`, so a foldered entry counts its segments), `cache_drop_blocker(video)` (the
+  refusal text, or None) and `drop_local_cache(base_dir, video)` (measure, then `_evict`,
+  return the bytes). `_evict` gained `app_config: Optional[dict] = None` because the public
+  path has no config to pass while every eviction caller still does. The rule lives in
+  storage rather than in the route because 34.1 just demonstrated that a cache removal
+  without the Drive-copy / mid-upload rule is a data-loss bug, and a second copy of that
+  rule inside a button is how the two drift apart.
+- **35.2** `app/routes/admin.py`: `_video_action_answer(ok, message, **extra)` answers JSON
+  to a `data-async` form and flash + redirect otherwise (16.1, 400 on refusal), plus
+  `POST /admin/videos/<id>/cache/delete` -> `delete_video_cache`. Guard order: the row exists;
+  no stream job owns the tree (`building` / `repairing`); `cache_drop_blocker`; then the
+  nothing-cached case, which is an honest success rather than an error. Success logs
+  `admin: id=N local cache dropped (B bytes freed)` and answers `{ok, message, video_id,
+  freed_bytes, cached: false, stream_state: none}`. `_fmt_mb` renders the freed size as MB so
+  this flash reads like the headroom flashes of 34.3.
+- **35.3** `app/templates/admin_videos.html`: a Drop cache button between Repair GOP and
+  Delete, `data-async data-async-action="drop-cache"`, with a confirm line that names what
+  survives; `data-cached` on the Cached cell and `data-stream-state` on the HLS badge; the
+  page handler flips both to no / none and disables the button so a second click cannot
+  pretend to free the same bytes again.
+- **35.4** `testing/probe_admin_cache_drop.py` (new): footprint, form wiring, the drop, the
+  three refusals with every fixture file asserted still on disk, the nothing-cached no-op and
+  the non-AJAX 302 path. Each fixture case is 21,219 B (4,096 B MP4 + playlist + init +
+  2 segments) in the folder shape 31.4 introduced.
+
+### 35.2 What the button does and what it refuses to do
+
+| it does | it does not |
+|---------|-------------|
+| delete `storage/videos/<hash>/<hash>.mp4` and `storage/videos/<hash>/stream/`, pruning the empty `<hash>/` | touch the Drive file, the row, title, description, tags, cover, comments, view counts or folder placement |
+| clear `local_filename` and `stream_dir` and set `stream_state` back to `none`, so the watch page stops advertising a stream that is gone | take the video out of home / search / My Videos - it is still a Drive-backed video, playable through Download and play |
+| report the exact bytes freed in the toast and in `app.log` | act on a video whose Drive mirror has not completed - refused by design |
+
+Refusals, all asserted by 35.4: no `google_drive_file_id`; `status` is `uploading`;
+`stream_state` is `building` or `repairing`.
+
+### 35.3 Verification (2026-11-04 18:09:10, project venv)
+
+- `python -m compileall -q app main.py wsgi.py testing` - exit 0.
+- `python -m pyright app` - 0 errors, 0 warnings, 0 informations.
+- `python testing/probe_admin_cache_drop.py` - ALL DROP-CACHE PROBES PASSED, printing the three
+  refusal messages verbatim and `freed 21219 B, row kept with its Drive id`.
+- `python testing/run_probes.py --timeout 90` - **20/20 probes passed** (the suite grew with 35.4).
+
+### 35.4 Deferred from this section
+
+- The button is admin-only (`@admin_required`, under `/admin`). Mirroring it on the owner page
+  (`app/templates/user.html`) needs the same ownership check `user.delete_video` does - not
+  requested, not built.
+- The Cached column still says yes / no rather than a byte size. Per-row footprints would mean
+  a stat walk per row on every render (86 cached rows on the VPS, each with a segment tree);
+  the freed-bytes number is reported at drop time instead.
+- Nothing of 35 has run on the VPS: it is dev-side code committed on top of 34, and it changes
+  no behaviour until `hls_enabled` is flipped and a stream tree actually exists to drop.

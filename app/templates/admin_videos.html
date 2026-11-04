@@ -38,12 +38,12 @@
             </td>
             <td class="vt-uploaded muted" data-ts="{{ video['uploaded_at'] if video['uploaded_at'] else '' }}"></td>
             <td>{{ video['status'] }}</td>
-            <td>{{ 'yes' if video['local_filename'] else 'no' }}</td>
+            <td data-cached>{{ 'yes' if video['local_filename'] else 'no' }}</td>
             {# 31.8/32.3: HLS state. 'none' means "nothing built yet" - a video with
                a long keyframe interval stays 'none' until a repair runs. #}
             <td>
               {% set stream_state = video['stream_state'] or 'none' %}
-              <span class="card__tag" title="HLS stream state (31.1)">
+              <span class="card__tag" data-stream-state title="HLS stream state (31.1)">
                 {{ stream_state }}{% if stream_state == 'ready' and video['stream_source'] %} · {{ video['stream_source'] }}{% endif %}
               </span>
             </td>
@@ -68,6 +68,12 @@
                     data-confirm="Repair this video's keyframe interval? The server re-encodes it to H.264 on one core (roughly 1 s per second of video). The Google Drive original is not touched.">
               {{ csrf_field() }}
                 <button type="submit" class="btn btn--sm">Repair GOP</button>
+              </form>
+              <form method="post" action="{{ url_for('admin.delete_video_cache', video_id=video['id']) }}"
+                    data-async data-async-action="drop-cache"
+                    data-confirm="Drop the cached copy this video occupies on this server? Its MP4 and its HLS segments are deleted here; the Google Drive file, the row, the cover and the comments stay, so the watch page can download it again.">
+              {{ csrf_field() }}
+                <button type="submit" class="btn btn--sm">Drop cache</button>
               </form>
               <form method="post" action="{{ url_for('user.delete_video', video_id=video['id']) }}"
                     data-async data-async-remove="tr"
@@ -111,6 +117,17 @@
       if (btn) btn.textContent = pinned ? 'Unpin' : 'Pin';
       var badge = row.querySelector('[data-pin-badge]');
       if (badge) badge.hidden = !pinned;
+    };
+    // Drop cache (§35): the row stays, only its two cache cells change.
+    window.svsAsyncActions['drop-cache'] = function (form, data) {
+      var row = form.closest('tr');
+      if (!row) return;
+      var cached = row.querySelector('[data-cached]');
+      if (cached) cached.textContent = 'no';
+      var state = row.querySelector('[data-stream-state]');
+      if (state) state.textContent = (data && data.stream_state) || 'none';
+      var btn = form.querySelector('button[type="submit"]');
+      if (btn) btn.disabled = true;
     };
   </script>
 </div>
