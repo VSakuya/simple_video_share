@@ -112,5 +112,5 @@
 </div>
 
 <script>window.SVS_MAX_BITRATE_KBPS = {{ max_bitrate_kbps }};</script>
-<script type="module" src="{{ url_for('static', filename='js/upload.js') }}"></script>
+<script type="module" src="{{ url_for('static', filename='js/upload.js') }}?v={{ static_version }}"></script>
 {% endblock %}

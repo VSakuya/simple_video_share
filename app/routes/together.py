@@ -4,7 +4,6 @@ Room list, room view (synchronized player + ephemeral chat), SSE presence
 stream, chat, and play-state control. All routes require login.
 """
 
-import os
 from typing import Any
 
 from flask import (
@@ -37,12 +36,17 @@ def _me_info(user: dict[str, Any]) -> dict[str, Any]:
 
 
 def _is_cached(video: dict[str, Any]) -> bool:
-    """True when a locally playable copy of ``video`` exists on disk."""
-    local = video.get("local_filename")
-    if not local:
-        return False
-    videos_dir = current_app.config.get("VIDEOS_DIR", "")
-    return os.path.exists(os.path.join(videos_dir, local))
+    """True when a locally playable copy of ``video`` exists on disk.
+
+    §31.7 blocker 2: Watch Together plays through ``watch.stream``, so a video whose
+    MP4 was replaced by its segments must count as playable here too - otherwise the
+    room would bounce to the watch page even though HLS works. Same predicate as
+    watch.py (storage.is_locally_playable).
+    """
+    from .. import storage
+    return storage.is_locally_playable(
+        current_app.config.get("VIDEOS_DIR", ""), video
+    )
 
 
 @together_bp.route("", methods=["GET"])

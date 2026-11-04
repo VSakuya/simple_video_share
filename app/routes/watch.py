@@ -3,10 +3,11 @@
 import hashlib
 import logging
 import os
+import re
 import threading
 import uuid
 from pathlib import Path
-from typing import Any, Dict, Set
+from typing import Any, Dict, Optional, Set
 from flask import Blueprint, current_app, flash, jsonify, redirect, render_template, request, url_for
 from .. import db
 from ..auth import current_user, login_required
@@ -65,29 +66,69 @@ def page(video_id: int) -> str:
         comments=comments,
         kaomoji_set=KAOMOJI_SET,
         max_comment_length=MAX_COMMENT_LENGTH,
-        is_cached=_is_cached(video),
+        is_cached=_is_playable_locally(video),
         has_drive=bool(video.get("google_drive_file_id")),
         video_tags=db.get_video_tags(video_id),
     )
 
 
-def _is_cached(video: dict[str, Any]) -> bool:
-    """True when a locally playable copy of ``video`` exists on disk."""
-    local = video.get("local_filename")
-    if not local:
-        return False
-    return os.path.exists(os.path.join(app_videos_dir(), local))
+def _is_playable_locally(video: dict[str, Any]) -> bool:
+    """True when ``video`` can be played from this server without a Drive download.
 
-
-def _cached_filename(title: str, videos_dir: str) -> str:
-    """Pick a unique, hash-based on-disk filename for a freshly downloaded copy.
-
-    Same style as the upload/Drive naming: a short SHA-256 digest so same-title
-    videos never collide on disk. The uuid keeps it unique per download.
+    §31.7 blocker 1: with ``hls_keep_source: false`` the MP4 is deleted once its
+    segments validated, so "cached" means the MP4 **or** a validated stream tree.
     """
-    seed = f"{title}|{uuid.uuid4().hex}"
+    from .. import storage
+    return storage.is_locally_playable(app_videos_dir(), video)
+
+
+def _stream_dir(video: dict[str, Any]) -> Optional[Path]:
+    """The stream directory for ``video``, or None when it is not on disk."""
+    from .. import hls
+    stream_dir = hls.stream_dir_for(Path(app_videos_dir()), video)
+    if stream_dir is None or not stream_dir.is_dir():
+        return None
+    return stream_dir
+
+
+def _validated_stream_dir(video: dict[str, Any]) -> Optional[Path]:
+    """The ``ready`` stream of ``video`` when its files still check out (§31.5).
+
+    Revalidating on read is what turns a tree that was half-deleted out from under
+    the row into a clean 404 (and a ``stale`` row) instead of a playlist that names
+    missing segments.
+    """
+    from .. import hls
+    if str(video.get("stream_state") or "") != hls.STATE_READY:
+        return None
+    stream_dir = _stream_dir(video)
+    if stream_dir is None:
+        return None
+    ok, why = hls.validate_stream(stream_dir, video.get("duration"))
+    if not ok:
+        logger.warning("watch: id=%s stream invalid on read: %s", video["id"], why)
+        hls.mark_stale(int(video["id"]), "invalid on read")
+        return None
+    return stream_dir
+
+
+def _cached_filename(video: dict[str, Any], videos_dir: str) -> str:
+    """Pick the on-disk path for a freshly downloaded copy (§31.3).
+
+    Same hash style as the upload/Drive naming so same-title videos never collide.
+    A download lands in ``videos/<hash>/<hash>.mp4``; when the row still knows its
+    stream tree (``<hash>/stream``), the download reuses that same folder so the
+    re-downloaded source and its segments stay together and no orphan folder is
+    left behind.
+    """
+    stored = str(video.get("stream_dir") or "").replace("\\", "/")
+    if stored:
+        folder = Path(stored).parent
+        if folder != Path(".") and re.fullmatch(r"[0-9a-fA-F_-]{4,80}", folder.name):
+            return f"{folder.name}/{folder.name}.mp4"
+    seed = f"{video.get('title') or 'video'}|{uuid.uuid4().hex}"
     digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()
-    return f"{digest[:16]}.mp4"
+    return f"{digest[:16]}/{digest[:16]}.mp4"
 
 
 @watch_bp.route("/<int:video_id>/cache", methods=["POST"])
@@ -120,6 +161,18 @@ def start_cache(video_id: int) -> Any:
         # Already playable.
         return jsonify(ok=True, cached=True, transferred=0, total=0)
 
+    # §31.4: reserve room for the MP4 **and** its segments (the peak while a
+    # stream is being built), evicting LRU videos first when needed.
+    from .. import storage
+    incoming = int(video.get("size_bytes") or 0)
+    if incoming and not storage.ensure_space(
+        os.path.dirname(videos_dir), incoming, current_app.config
+    ):
+        return (
+            jsonify(ok=False, error="Not enough free disk space on this server."),
+            507,
+        )
+
     with _cache_lock:
         if video_id in _cache_in_flight:
             # Attach to the in-flight download; the page keeps polling.
@@ -131,7 +184,7 @@ def start_cache(video_id: int) -> Any:
                 total=p.get("total", 0),
                 error=p.get("error"),
             )
-        filename = _cached_filename(video.get("title") or "video", videos_dir)
+        filename = _cached_filename(video, videos_dir)
         _cache_in_flight.add(video_id)
         _cache_progress[video_id] = {
             "transferred": 0,
@@ -159,7 +212,7 @@ def cache_status(video_id: int) -> Any:
     video = db.get_video_by_id(video_id)
     if video is None:
         return jsonify(cached=False, active=False, error="Video not found.")
-    if _is_cached(video):
+    if _is_playable_locally(video):
         return jsonify(cached=True, active=False, transferred=0, total=0, error=None)
     with _cache_lock:
         p = dict(_cache_progress.get(video_id, {}))
@@ -185,9 +238,11 @@ def _run_cache(
     app_config: Any,
 ) -> None:
     """Background worker: pull ``drive_id`` from Drive into ``videos_dir`` (§13.33)."""
-    from .. import drive, storage
+    from .. import drive, hls, storage
 
     dest = os.path.join(videos_dir, filename)
+    # §31.3: cache downloads are foldered (videos/<hash>/<hash>.mp4).
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
 
     def _report(transferred: int, total: int) -> None:
         with _cache_lock:
@@ -205,6 +260,17 @@ def _run_cache(
             if p is not None:
                 p["done"] = True
         logger.info("cache: video id=%s now cached as %s", video_id, filename)
+        # §31.5: segment right here - this is the cold-cache equivalent of the
+        # upload worker's post-mirror hook: the file is complete and in Drive.
+        # hls_keep_source may then delete the MP4 and keep only the segments.
+        try:
+            row = db.get_video_by_id(video_id)
+            if row is not None:
+                hls.ensure_stream(
+                    Path(videos_dir), row, app_config, reason="post-download",
+                )
+        except Exception as exc:  # noqa: BLE001 - the MP4 still plays without HLS
+            logger.warning("cache: HLS build failed for id=%s: %s", video_id, exc)
         # Enforce the admin cache-capacity cap now that a new local copy exists
         # (protect the video we just downloaded from eviction).
         try:
@@ -365,20 +431,83 @@ def delete_comment(video_id: int, comment_id: int) -> Any:
 @watch_bp.route("/<int:video_id>/stream")
 @login_required
 def stream(video_id: int) -> Any:
-    """Serve the cached video with HTTP Range support (P3)."""
+    """Serve the cached MP4 with HTTP Range support (P3).
+
+    This is the progressive path. A video whose MP4 was replaced by its segments
+    (§31.1) is played through ``/hls/playlist.m3u8`` instead - the player helper
+    (§31.10) makes that choice, so this route answering 503 for a segments-only
+    video is the expected shape, not a failure.
+    """
     from flask import send_file, abort
     video = db.get_video_by_id(video_id)
     if video is None:
         abort(404)
-    if not video.get("local_filename"):
-        # Not cached locally; P3 will download from Drive first.
+    local = video.get("local_filename")
+    if not local:
         abort(503)
-    import os
-    path = os.path.join(app_videos_dir(), video["local_filename"])
+    path = os.path.join(app_videos_dir(), str(local))
     if not os.path.exists(path):
         abort(503)
     db.touch_video(video_id)
     return send_file(path, conditional=True)
+
+
+@watch_bp.route("/<int:video_id>/hls/playlist.m3u8")
+@login_required
+def hls_playlist(video_id: int) -> Any:
+    """Serve the media playlist of a validated stream (§31.6).
+
+    Requests never build a stream: segmentation lives in the Drive worker, the
+    cache worker, or an explicit admin action, so no viewer ever waits for ffmpeg.
+    ``no-cache`` because the tree can be replaced (repair, re-cut) while the URL
+    stays the same; send_file still supplies ETag/Last-Modified for cheap revalidation.
+    """
+    from flask import abort, send_file
+    from .. import hls
+    video = db.get_video_by_id(video_id)
+    if video is None:
+        abort(404)
+    stream_dir = _validated_stream_dir(video)
+    if stream_dir is None:
+        abort(404)
+    db.touch_video(video_id)
+    response = send_file(
+        stream_dir / hls.PLAYLIST_NAME,
+        mimetype="application/vnd.apple.mpegurl",
+    )
+    response.headers["Cache-Control"] = "private, no-cache"
+    return response
+
+
+@watch_bp.route("/<int:video_id>/hls/<asset>")
+@login_required
+def hls_asset(video_id: int, asset: str) -> Any:
+    """Serve the init segment or exactly one segment named by the playlist (§31.6).
+
+    The name is matched against the strict segment pattern and against the playlist
+    itself, so this route can only ever read a file that the validated stream lists -
+    never a path of the caller's choosing. Segments are immutable once built, hence
+    the long private max-age. Range requests work (send_file conditional=True).
+    """
+    from flask import abort, send_file
+    from .. import hls
+    video = db.get_video_by_id(video_id)
+    if video is None:
+        abort(404)
+    stream_dir = _stream_dir(video)
+    if stream_dir is None:
+        abort(404)
+    allowed = hls.playlist_segment_names(stream_dir)
+    init_name = hls.playlist_init_name(stream_dir)
+    if asset != init_name and asset not in allowed:
+        abort(404)
+    path = stream_dir / asset
+    if not path.is_file():
+        abort(404)
+    db.touch_video(video_id)
+    response = send_file(path, mimetype="video/mp4", conditional=True)
+    response.headers["Cache-Control"] = "private, max-age=3600"
+    return response
 
 
 @watch_bp.route("/<int:video_id>/download")
@@ -395,15 +524,48 @@ def download(video_id: int) -> Any:
     if video is None:
         abort(404)
     local = video.get("local_filename")
-    if not local:
+    if local:
+        path = os.path.join(app_videos_dir(), str(local))
+        if os.path.exists(path):
+            db.touch_video(video_id)
+            ext = local.rsplit(".", 1)[-1] if "." in local else ""
+            download_name = f"{video['title']}.{ext}" if ext else str(video["title"])
+            return send_file(path, as_attachment=True, download_name=download_name)
+    # §31.7: the MP4 is gone but the segments are complete. An fMP4 init segment
+    # followed by its media segments in playlist order IS a valid fragmented MP4,
+    # so the download button keeps working with no Drive round trip. Served as one
+    # streamed body (no Range), which is what a save-to-disk needs.
+    stream_dir = _validated_stream_dir(video)
+    if stream_dir is None:
         abort(503)
-    path = os.path.join(app_videos_dir(), local)
-    if not os.path.exists(path):
-        abort(503)
+    from flask import Response
+    from .. import hls
     db.touch_video(video_id)
-    ext = local.rsplit(".", 1)[-1] if "." in local else ""
-    download_name = f"{video['title']}.{ext}" if ext else str(video["title"])
-    return send_file(path, as_attachment=True, download_name=download_name)
+    response = Response(hls.iter_stream_bytes(stream_dir), mimetype="video/mp4")
+    response.headers["Content-Length"] = str(hls.stream_bytes_length(stream_dir))
+    response.headers["Content-Disposition"] = _attachment_header(
+        f"{video['title']}.mp4"
+    )
+    return response
+
+
+def _attachment_header(filename: str) -> str:
+    """Build an RFC 6266 attachment header for the reassembled download.
+
+    Werkzeug 3.1 has no ContentDisposition helper, and send_file cannot be used
+    for a body assembled from several segment files, so the ASCII fallback and
+    the UTF-8 filename* are assembled here. Control characters and quotes are
+    stripped - a video title is attacker-visible text.
+    """
+    from urllib.parse import quote
+
+    ascii_name = filename.encode("ascii", "ignore").decode("ascii")
+    ascii_name = "".join(ch for ch in ascii_name if 0x20 <= ord(ch) < 0x7F)
+    ascii_name = ascii_name.replace('"', "").strip() or "video.mp4"
+    return (
+        "attachment; filename=\"" + ascii_name + "\"; "
+        "filename*=UTF-8''" + quote(filename)
+    )
 
 
 def app_videos_dir() -> str:

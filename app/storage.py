@@ -9,12 +9,18 @@ Two independent constraints protect local disk:
   total exceeds it, evict LRU videos that already have a copy on Google Drive.
 
 Both evict the same way: oldest-accessed cached videos first, and a video is
-only evicted when a Drive copy exists AND it is not mid-upload (``status``
-``'uploading'`` / in-flight), so an in-progress upload is never dropped.
+only evicted when a Drive copy exists AND it is not mid-upload (status
+'uploading' / in-flight), so an in-progress upload is never dropped.
+
+Since §31.4 a cache entry is a folder, not a file: storage/videos/<hash>/ holds
+the MP4 copy and its stream/ segment tree. Every size calculation here therefore
+stats files and directories alike, and eviction removes a whole tree (a size read
+on a directory, or unlink() on one, would both be wrong).
 """
 
 import os
 import shutil
+import sys
 import uuid
 from pathlib import Path
 from typing import Iterable, Optional
@@ -53,40 +59,83 @@ def max_cache_bytes(app_config: dict) -> int:
     return int(app_config.get("max_cache_mb", 0)) * 1024 * 1024
 
 
-def actual_cache_bytes(videos_dir) -> int:
-    """Total size (bytes) of locally-cached video files that exist on disk.
+def _entry_bytes(base: str, rel: str | None) -> int:
+    """Size of one cache entry on disk: a file, or every file under a directory.
 
-    Unlike ``db.sum_cached_bytes`` (the size recorded at upload time), this
-    stats the real files. A row whose ``local_filename`` is set but whose file
-    is missing (e.g. the media was not copied during a server migration)
-    contributes 0, so the total tracks what is actually cached right now.
+    §31.4: a cached video is a folder (``<hash>/`` holding ``<hash>.mp4`` plus the
+    ``stream/`` segment tree). os.path.getsize on a directory returns the size of
+    the directory entry, not its contents, so directories are walked instead.
+    """
+    if not rel:
+        return 0
+    path = os.path.join(base, rel)
+    try:
+        if os.path.isdir(path):
+            total = 0
+            for root, _dirs, files in os.walk(path):
+                for name in files:
+                    try:
+                        total += os.path.getsize(os.path.join(root, name))
+                    except OSError:
+                        continue
+            return total
+        return os.path.getsize(path)
+    except OSError:
+        return 0  # entry missing (not migrated / deleted) -> contributes 0
+
+
+def actual_cache_bytes(videos_dir) -> int:
+    """Total size (bytes) of everything cached on disk: MP4 copies and streams.
+
+    Unlike db.sum_cached_bytes (the size recorded at upload time), this stats the
+    real files. A row whose file is missing (e.g. the media was not copied during
+    a server migration) contributes 0, so the total tracks what is cached now.
     """
     base = str(videos_dir)
     total = 0
-    for name in db.list_cached_local_names():
-        try:
-            total += os.path.getsize(os.path.join(base, name))
-        except OSError:
-            continue  # file missing (not migrated / deleted) -> contributes 0
+    for entry in db.list_cache_paths():
+        total += _entry_bytes(base, entry.get("local_filename"))
+        total += _entry_bytes(base, entry.get("stream_dir"))
     return total
 
 
 def ensure_space(
-    base_dir: str, incoming_bytes: int, app_config: dict
+    base_dir: str, incoming_bytes: int, app_config: dict, peak_factor: float | None = None
 ) -> bool:
     """Ensure ``incoming_bytes`` can be stored while keeping the reserve free.
 
     Evicts LRU cached videos (already on Google Drive) as needed.
     Returns True if enough space is available, False otherwise (upload should
     be rejected).
+
+    ``peak_factor`` is the multiplier applied to the incoming size. With HLS
+    enabled the default is 2.0: an upload briefly holds the MP4 AND its segments
+    (measured equal in size, §30.2) until the stream validates and the MP4 is
+    dropped, so a 1.0 reservation lets a large upload pass the pre-check and then
+    die halfway through segmentation. A caller with a different peak (a repair,
+    where the source is already on disk) passes its own factor.
     """
     reserve = min_free_space_bytes(app_config)
-    while free_space_bytes(base_dir) < reserve + incoming_bytes:
+    factor = peak_factor if peak_factor is not None else _peak_factor(app_config)
+    needed = int(incoming_bytes * max(1.0, float(factor)))
+    while free_space_bytes(base_dir) < reserve + needed:
         candidate = _next_evict_candidate(base_dir, app_config)
         if candidate is None:
             break
         _evict(candidate, base_dir, app_config)
-    return free_space_bytes(base_dir) >= reserve + incoming_bytes
+    return free_space_bytes(base_dir) >= reserve + needed
+
+
+def _peak_factor(app_config: dict) -> float:
+    """Reservation multiplier for a new video: 2.0 while HLS is enabled (§31.4)."""
+    try:
+        from . import hls
+
+        if hls.settings(app_config)["enabled"]:
+            return 2.0
+    except Exception:  # noqa: BLE001 - a broken HLS config must not block uploads
+        pass
+    return 1.0
 
 
 def _next_evict_candidate(
@@ -95,11 +144,13 @@ def _next_evict_candidate(
     """Return the oldest-accessed cached video that has a Drive copy.
 
     Videos in ``protected`` (in-flight uploads) and any still ``'uploading'``
-    are skipped, so an in-progress upload is never evicted.
+    are skipped, so an in-progress upload is never evicted. A segments-only video
+    (``hls_keep_source`` cleared ``local_filename``, §31.1) is still a cache entry
+    and must stay evictable, or the cache cap could never reclaim it.
     """
     protected_set = set(protected or ())
     for video in db.list_lru_cached():
-        if not video.get("local_filename"):
+        if not (video.get("local_filename") or video.get("stream_dir")):
             continue
         if video["id"] in protected_set:
             continue
@@ -139,13 +190,58 @@ def enforce_cache_limit(
 
 
 def _evict(video: dict, base_dir: str, app_config: dict) -> None:
-    """Delete the local cached file (Drive copy remains) and clear the flag."""
+    """Delete a video local cache - the MP4 copy AND its stream tree (Drive remains).
+
+    A stream tree is a directory, so it needs rmtree (unlink() on a directory
+    raises), and the folder that held a foldered upload is pruned once empty.
+    stream_state is reset so the watch page stops offering a stream that is no
+    longer on disk.
+    """
+    videos_dir = Path(base_dir) / "videos"
+    for rel in (video.get("local_filename"), video.get("stream_dir")):
+        if not rel:
+            continue
+        path = videos_dir / str(rel)
+        try:
+            if path.is_dir():
+                shutil.rmtree(path, ignore_errors=True)
+            elif path.exists():
+                path.unlink()
+        except OSError as exc:  # noqa: BLE001 - the DB flags are cleared regardless
+            print(f"warn: could not evict {path}: {exc}", file=sys.stderr)
+        # A foldered upload leaves <hash>/ behind; drop it when nothing is left.
+        try:
+            if path.parent != videos_dir and path.parent.is_dir():
+                if not any(path.parent.iterdir()):
+                    path.parent.rmdir()
+        except OSError:
+            pass
+    db.update_video(
+        video["id"],
+        local_filename=None,
+        stream_dir=None,
+        stream_state="none",
+    )
+
+
+def is_locally_playable(videos_dir, video: dict) -> bool:
+    """True when a video can be played from this server with no Drive round trip.
+
+    Two shapes count (§31.7 blocker 1): the local MP4 copy, or - once
+    ``hls_keep_source`` dropped that copy - a validated HLS tree. The watch page
+    and the Watch Together page both key off this predicate.
+    """
+    base = str(videos_dir)
     local = video.get("local_filename")
-    if local:
-        path = Path(base_dir) / "videos" / local
-        if path.exists():
-            path.unlink()
-    db.update_video(video["id"], local_filename=None)
+    if local and os.path.exists(os.path.join(base, str(local))):
+        return True
+    from . import hls  # lazy import: storage stays importable on its own
+    if str(video.get("stream_state") or "") != hls.STATE_READY:
+        return False
+    stream_dir = hls.stream_dir_for(Path(base), video)
+    if stream_dir is None:
+        return False
+    return hls.validate_stream(stream_dir, video.get("duration"))[0]
 
 
 def save_upload_as(uploaded_file, dest_dir: Path, filename: str) -> str:
@@ -155,6 +251,9 @@ def save_upload_as(uploaded_file, dest_dir: Path, filename: str) -> str:
     ``routes.upload._unique_video_name``). Returns ``filename``.
     """
     path = dest_dir / filename
+    # §31.3: new uploads live in videos/<hash>/<hash>.mp4, so the folder
+    # has to exist before the first write.
+    path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("wb") as fh:
         shutil.copyfileobj(uploaded_file.stream, fh)
     return filename

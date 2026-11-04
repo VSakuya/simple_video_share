@@ -36,3 +36,31 @@
 ## 运行方式
 
 - 本地开发: `python main.py`
+- 生产（Linux VPS）：`./start.sh` —— 拉取代码、创建 `.venv`、安装依赖，然后启动
+  Waitress。必须以**单进程（多线程）**运行：房间在室状态、上传进度、Watch Together
+  的同步状态只存在于进程内存中；一旦检测到多 worker 启动器，或第二个共享
+  `storage/` 的实例，`app/runtime_guard.py` 会以 CRITICAL 级别告警。
+- 回归探测脚本：`python testing/run_probes.py`（参数 `--list`、`--only <name>`、
+  `--timeout <s>`、`--with-node`）。单个脚本也可独立运行，例如
+  `python testing/probe_home_cards.py`。
+
+## 安全与依赖说明
+
+- 所有 POST 表单都通过 `{{ csrf_field() }}` 携带令牌，`app/static/js/csrf.js`
+  会给同源的非安全请求（POST 等）附加 `X-CSRF-Token`。守卫本体在 `app/csrf.py`。
+- `config.json` 中的 `cookie_secure`（默认 `true`）为会话 Cookie 设置 `Secure`
+  标记；`HttpOnly` 与 `SameSite=Lax` 始终开启。只有当你需要从局域网内的其他机器
+  以明文 HTTP 测试时才设为 `false`（浏览器把 `http://127.0.0.1` 视为安全上下文，
+  本地开发无需改动）。
+- `requirements.txt` 已锁定版本，因为 `start.sh` 每次部署都会重新安装：请显式地
+  升级某个锁定项，而不是让上游新版本自行混入。仅用于开发的工具（pyright）锁定在
+  `requirements-dev.txt` 中，`start.sh` 不会安装它。
+
+## 可选的 32 MB 资源：ffmpeg.wasm
+
+`app/static/js/ffmpeg/ffmpeg-core.wasm` 有意**不纳入 Git**。上传转码由浏览器侧的
+mediabunny（WebCodecs）完成，ffmpeg.wasm 只是浏览器无法编码时的 Stage-2 回退路径。
+把 32 MB 的二进制放进仓库，会让每次 clone 和每次开机 `git pull` 都搬运它；因此在
+缺失状态下启动日志会出现一行警告，回退路径不可用，直到手动放置该文件：
+
+    cp /somewhere/ffmpeg-core.wasm app/static/js/ffmpeg/ffmpeg-core.wasm

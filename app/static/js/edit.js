@@ -860,7 +860,7 @@ async function runMediabunny(file, opts) {
     quality: new mb.Quality({ bitrate: opts.bitrateKbps * 1000, bitrateMode: "constant" }), // bitrate is bps; CBR pins the output to the cap (VBR overshoots ~2x)
     forceTranscode: true, // re-encode the video (audio stays on copy)
     hardwareAcceleration: 'prefer-hardware',
-    keyFrameInterval: 300,
+    keyFrameInterval: 2, // mediabunny measures this in SECONDS, not frames: 2 = a keyframe every 2 s. A short GOP is what makes seeking fast and copy-only segmentation possible (documents/PROJECT_PROGRESS.md 30.1); 300 here asked for one keyframe every 5 minutes.
   };
   // Caps are applied only when needed (a 0 value means "keep original").
   // When only height is capped, mediabunny auto-computes the width to preserve

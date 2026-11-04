@@ -134,6 +134,7 @@
   <!-- Submit -->
   <form id="upload-form" method="post" enctype="multipart/form-data"
         action="{{ url_for('upload.submit') }}">
+  {{ csrf_field() }}
     <button type="submit" id="upload-button" class="upload-submit">Upload</button>
   </form>
 
@@ -179,5 +180,5 @@
 <script src="{{ url_for('static', filename='vendor/cropper.min.js') }}"></script>
 
 <script>window.SVS_MAX_BITRATE_KBPS = {{ max_bitrate_kbps }};</script>
-<script type="module" src="{{ url_for('static', filename='js/edit.js') }}"></script>
+<script type="module" src="{{ url_for('static', filename='js/edit.js') }}?v={{ static_version }}"></script>
 {% endblock %}

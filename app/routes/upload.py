@@ -173,7 +173,7 @@ def submit() -> Any:
         _meta_from_form(), videos_dir,
     )
     if video_id is None:
-        _remove_quiet(os.path.join(str(videos_dir), video_name))
+        _remove_upload_quiet(os.path.join(str(videos_dir), video_name), videos_dir)
         if cover_name:
             _remove_quiet(os.path.join(str(covers_dir), cover_name))
         return _fail(err or "Could not register the video.", status=500)
@@ -312,6 +312,7 @@ def seg_finish() -> Any:
 
     video_name = _unique_video_name(sess["title"], videos_dir)
     final_path = videos_dir / video_name
+    final_path.parent.mkdir(parents=True, exist_ok=True)  # §31.3 foldered name
     with final_path.open("wb") as out:
         for p in parts:
             with p.open("rb") as fh:
@@ -323,7 +324,7 @@ def seg_finish() -> Any:
         sess["folder_id"], _meta_from_form(), videos_dir,
     )
     if video_id is None:
-        _remove_quiet(str(final_path))
+        _remove_upload_quiet(str(final_path), videos_dir)
         if cover_name:
             _remove_quiet(os.path.join(str(covers_dir), cover_name))
         return jsonify(ok=False, error=err or "Could not register the video."), 400
@@ -456,12 +457,24 @@ def _unique_video_name(title: str, videos_dir: Path) -> str:
     # even for identical title pairs; the human title stays in the DB for display.
     seed = f"{title}|{uuid.uuid4().hex}"
     digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()
-    return f"{digest[:16]}.mp4"
+    # §31.3: one folder per video, so the HLS segments of this file have an
+    # obvious home (videos/<hash>/stream) and eviction can drop the whole entry
+    # at once. Old rows keep their flat name and still work.
+    return f"{digest[:16]}/{digest[:16]}.mp4"
 
 
 def _rmtree_quiet(path: Path) -> None:
     if path.exists():
         shutil.rmtree(path, ignore_errors=True)
+
+
+def _rmdir_if_empty(path: Path) -> None:
+    """Remove a now-empty video folder (§31.3); never touches videos_dir itself."""
+    try:
+        if path.is_dir() and not any(path.iterdir()):
+            path.rmdir()
+    except OSError:  # noqa: BLE001 - cleanup is best-effort
+        pass
 
 
 def _valid_seg_token(token: str) -> bool:
@@ -589,6 +602,18 @@ def _file_size(file_storage: Any) -> int:
         return size
     except Exception:  # noqa: BLE001 - fall back to 0 if unreadable
         return 0
+
+
+def _remove_upload_quiet(video_path: str, videos_dir: Path) -> None:
+    """Delete a just-written video file plus the empty folder that held it (§31.3).
+
+    A failed registration must not leave an empty videos/<hash>/ behind. The
+    parent is only pruned when it is not the videos directory itself.
+    """
+    _remove_quiet(video_path)
+    parent = Path(video_path).parent
+    if parent != Path(str(videos_dir)):
+        _rmdir_if_empty(parent)
 
 
 def _remove_quiet(path: str) -> None:

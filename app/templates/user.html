@@ -12,6 +12,7 @@
     <form method="post" action="{{ url_for('user.create_folder') }}" class="folder-create"
           data-async data-async-refetch="#folder-tree"
           data-async-refetch-url="{{ url_for('user.folder_tree') }}">
+    {{ csrf_field() }}
       <input type="text" name="name" placeholder="New folder name" required>
       <button type="submit" class="btn btn--sm">Create folder</button>
     </form>
@@ -42,6 +43,7 @@
           <td class="vt-uploaded muted" data-ts="{{ video['uploaded_at'] if video['uploaded_at'] else '' }}"></td>
           <td>
             <form method="post" action="{{ url_for('user.move_video', video_id=video['id']) }}" class="folder-move">
+            {{ csrf_field() }}
               <select name="folder_id" class="folder-move__select" onchange="this.form.submit()">
                 <option value="">Root</option>
                 {% for f in folders_flat %}
@@ -67,6 +69,7 @@
           <td class="row-actions">
             {% if video['status'] == 'failed' %}
             <form method="post" action="{{ url_for('user.retry_video', video_id=video['id']) }}">
+            {{ csrf_field() }}
               <button type="submit" class="btn btn--ghost btn--sm">Retry</button>
             </form>
             {% endif %}
@@ -80,6 +83,7 @@
                   action="{{ url_for('user.delete_video', video_id=video['id']) }}"
                   data-confirm="Delete this video? This also removes the local copy and the Google Drive file."
                   data-async data-async-remove="tr">
+            {{ csrf_field() }}
               <button type="submit" class="btn btn--danger btn--sm btn-delvid">Delete</button>
             </form>
           </td>
@@ -97,6 +101,7 @@
     <article class="dialog-card">
       <h2>Edit video</h2>
       <form id="edit-form" method="post" enctype="multipart/form-data">
+      {{ csrf_field() }}
         <div class="upload-section">
           <label for="edit-title" class="upload-label">Title</label>
           <input id="edit-title" name="title" type="text" class="upload-input" required>

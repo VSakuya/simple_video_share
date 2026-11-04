@@ -16,6 +16,7 @@
   <td class="row-actions">
     <form method="post" action="{{ url_for('admin.delete_user', user_id=u['id']) }}"
           data-async data-async-remove="tr" data-confirm="Delete this user?">
+    {{ csrf_field() }}
       <button type="submit" class="btn btn--danger btn--sm">Delete</button>
     </form>
   </td>

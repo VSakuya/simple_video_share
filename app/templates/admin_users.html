@@ -8,6 +8,7 @@
     <h2>Create user</h2>
     <form id="create-user-form" method="post" action="{{ url_for('admin.create_user') }}"
           data-async data-async-add="#users-tbody">
+    {{ csrf_field() }}
       <div class="settings-grid">
         <div class="field">
           <label for="new-username">Username</label>

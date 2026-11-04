@@ -1,0 +1,5 @@
+# Development-only tools. start.sh installs requirements.txt only; nothing here
+# reaches the VPS. The verification workflow (.codex/project_rules.md) runs
+# `python -m pyright app`, so the type checker belongs in a file of its own.
+-r requirements.txt
+pyright==1.1.414

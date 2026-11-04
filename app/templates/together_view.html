@@ -2,6 +2,10 @@
 {% block title %}{{ video['title'] }} — Watch Together{% endblock %}
 {% block body_class %}page--live{% endblock %}
 {% block head %}
+<!-- hls.js (31.6, vendored 1.6.12) before DPlayer: its "hls" branch needs
+     window.Hls at construction time. Shared picker: 31.10. -->
+<script src="{{ url_for('static', filename='vendor/hls/hls.min.js') }}?v={{ static_version }}"></script>
+<script src="{{ url_for('static', filename='js/stream-player.js') }}?v={{ static_version }}"></script>
 <!-- DPlayer (§13.39): single self-contained vendor JS. -->
 <script src="{{ url_for('static', filename='vendor/dplayer/DPlayer.min.js') }}?v={{ static_version }}"></script>
 {% endblock %}
@@ -43,6 +47,10 @@
 
   var videoId = {{ video_id | tojson }};
   var streamUrl = {{ url_for('watch.stream', video_id=video['id']) | tojson }};
+  // 31.10: the same picker the watch page uses. HLS seeking is also what makes the
+  // room's hard-seek accurate (a 2 s GOP instead of the library's 133-167 s one).
+  var hlsUrl = {{ url_for('watch.hls_playlist', video_id=video_id) | tojson }};
+  var streamState = {{ (video.get('stream_state') or 'none') | tojson }};
   var coverUrl = {{ cover_url | tojson }};
   var presenceUrl = {{ url_for('together.presence_stream', video_id=video_id) | tojson }};
   var chatUrl = {{ url_for('together.chat', video_id=video_id) | tojson }};
@@ -53,13 +61,19 @@
 
   // --- DPlayer setup (§13.39, mirrored from watch.html) ---
   var container = document.getElementById('dplayer');
+  var picked = window.SVS_STREAM.pick({
+    progressiveUrl: streamUrl, hlsUrl: hlsUrl, streamState: streamState
+  });
   var dp = new DPlayer({
     container: container,
     autoplay: true,
     loop: false,
     hotkey: false,
-    video: { url: streamUrl, type: 'video', pic: coverUrl }
+    video: { url: picked.url, type: picked.type, pic: coverUrl }
   });
+  if (window.SVS_STREAM.usesHlsJs(picked)) {
+    window.SVS_STREAM.attachRecovery(dp, { label: 'together' });
+  }
   var videoEl = container.querySelector('video');
 
   // Sync state: the slowest viewer sets the pace (§17.4). The server broadcasts

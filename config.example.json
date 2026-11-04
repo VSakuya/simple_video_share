@@ -5,5 +5,13 @@
   "secret_key": "change-me-on-first-run",
   "base_path": "",
   "debug": false,
-  "seek_settle_seconds": 60.0
+  "seek_settle_seconds": 60.0,
+  "cookie_secure": true,
+  "hls_enabled": false,
+  "hls_segment_seconds": 6,
+  "hls_keep_source": false,
+  "hls_repair_enabled": true,
+  "hls_repair_preset": "ultrafast",
+  "hls_repair_crf": 26,
+  "ffmpeg_path": ""
 }

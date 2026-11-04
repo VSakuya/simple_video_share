@@ -24,6 +24,7 @@
         </p>
         <div class="admin-data__actions">
           <form method="post" action="{{ url_for('admin.import_bundle') }}" enctype="multipart/form-data" class="admin-data__import">
+          {{ csrf_field() }}
             <input type="file" name="archive" accept="application/zip" required>
             <button type="submit" class="btn">Import storage</button>
           </form>

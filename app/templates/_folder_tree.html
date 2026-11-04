@@ -4,6 +4,7 @@
     <form method="post" action="{{ url_for('user.rename_folder', folder_id=f['id']) }}"
           class="folder-rename" data-async data-async-refetch="#folder-tree"
           data-async-refetch-url="{{ url_for('user.folder_tree') }}">
+    {{ csrf_field() }}
       <input type="text" name="name" value="{{ f['name'] }}" required>
       <button type="submit" class="btn btn--ghost btn--sm">Rename</button>
     </form>
@@ -11,11 +12,13 @@
           data-confirm="Delete folder '{{ f['name'] }}'? Its videos move to Root."
           data-async data-async-refetch="#folder-tree"
           data-async-refetch-url="{{ url_for('user.folder_tree') }}">
+    {{ csrf_field() }}
       <button type="submit" class="btn btn--danger btn--sm">Delete</button>
     </form>
     <form method="post" action="{{ url_for('user.create_folder') }}" class="folder-add-sub"
           data-async data-async-refetch="#folder-tree"
           data-async-refetch-url="{{ url_for('user.folder_tree') }}">
+    {{ csrf_field() }}
       <input type="hidden" name="parent_id" value="{{ f['id'] }}">
       <input type="text" name="name" placeholder="Subfolder" required>
       <button type="submit" class="btn btn--ghost btn--sm">+ Sub</button>

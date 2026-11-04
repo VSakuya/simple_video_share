@@ -28,6 +28,7 @@
     <form method="post"
           action="{{ url_for('watch.add_comment', video_id=video_id) }}"
           class="comment__reply-form" data-reply-form="{{ c['id'] }}">
+    {{ csrf_field() }}
       <input type="hidden" name="parent_id" value="{{ c['id'] }}">
       <textarea name="body" rows="2" maxlength="{{ max_comment_length }}"
                 class="upload-input" required

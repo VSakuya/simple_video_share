@@ -31,6 +31,29 @@ DEFAULTS: dict[str, Any] = {
     # this value (a slow server serving a large video can need several seconds
     # for a hard-seek). Must be a multiple of 0.5 (the watch tick).
     "seek_settle_seconds": 60.0,
+    # Send the session cookie with the Secure flag (28.4). Keep it true: it is
+    # correct for the HTTPS deployment, and browsers treat http://127.0.0.1 as a
+    # secure context, so local development keeps working with it on. Flip it to
+    # false only when testing over plain HTTP from another machine on the LAN.
+    "cookie_secure": True,
+    # HLS segmentation of cached videos (§31, §32). hls_enabled is the master switch:
+    # it gates BOTH the ffmpeg build and offering HLS to a player, so a deploy with
+    # it off changes nothing at all. segment_seconds is the target segment length
+    # (ffmpeg snaps it to the source GOP). keep_source false means the cache keeps
+    # only the segment tree once a stream validates - measured equal in size to the
+    # MP4 (§30.2), so keeping both is what doubles the footprint. The repair knobs
+    # are the CPU-bound GOP fix an admin can trigger per video (0.65x realtime at
+    # ultrafast on the VPS); timeout_seconds is a hard kill for a runaway ffmpeg.
+    "hls_enabled": False,
+    "hls_repair_enabled": True,
+    "hls_segment_seconds": 6,
+    "hls_keep_source": False,
+    "hls_timeout_seconds": 600,
+    "hls_repair_timeout_seconds": 7200,
+    "hls_repair_preset": "ultrafast",
+    "hls_repair_crf": 26,
+    # Empty string means "find ffmpeg on PATH". An absolute path pins the binary.
+    "ffmpeg_path": "",
 }
 
 

@@ -11,7 +11,8 @@
         <thead>
           <tr>
             <th>Cover</th><th>Title</th><th>Owner</th><th>Uploaded</th>
-            <th>Status</th><th>Cached</th><th>Pinned</th><th class="row-actions">Actions</th>
+            <th>Status</th><th>Cached</th><th>Stream</th><th>Pinned</th>
+            <th class="row-actions">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -38,6 +39,14 @@
             <td class="vt-uploaded muted" data-ts="{{ video['uploaded_at'] if video['uploaded_at'] else '' }}"></td>
             <td>{{ video['status'] }}</td>
             <td>{{ 'yes' if video['local_filename'] else 'no' }}</td>
+            {# 31.8/32.3: HLS state. 'none' means "nothing built yet" - a video with
+               a long keyframe interval stays 'none' until a repair runs. #}
+            <td>
+              {% set stream_state = video['stream_state'] or 'none' %}
+              <span class="card__tag" title="HLS stream state (31.1)">
+                {{ stream_state }}{% if stream_state == 'ready' and video['stream_source'] %} · {{ video['stream_source'] }}{% endif %}
+              </span>
+            </td>
             <td>
               <span class="pin-badge" data-pin-badge{% if not video['is_pinned'] %} hidden{% endif %}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 0-1-1 2 2 0 0 1-2-2 1 1 0 0 0-2 0 2 2 0 0 1-2 2 1 1 0 0 0-1 1z"/></svg>
@@ -47,17 +56,29 @@
             <td class="row-actions">
               <form method="post" action="{{ url_for('admin.pin_video', video_id=video['id']) }}"
                     data-async data-async-action="pin">
+              {{ csrf_field() }}
                 <button type="submit" class="btn btn--sm">{{ 'Unpin' if video['is_pinned'] else 'Pin' }}</button>
+              </form>
+              <form method="post" action="{{ url_for('admin.rebuild_stream', video_id=video['id']) }}"
+                    data-confirm="Rebuild the HLS segments of this video from its local copy? This is a copy-only remux (no re-encode).">
+              {{ csrf_field() }}
+                <button type="submit" class="btn btn--sm">Rebuild stream</button>
+              </form>
+              <form method="post" action="{{ url_for('admin.repair_stream', video_id=video['id']) }}"
+                    data-confirm="Repair this video's keyframe interval? The server re-encodes it to H.264 on one core (roughly 1 s per second of video). The Google Drive original is not touched.">
+              {{ csrf_field() }}
+                <button type="submit" class="btn btn--sm">Repair GOP</button>
               </form>
               <form method="post" action="{{ url_for('user.delete_video', video_id=video['id']) }}"
                     data-async data-async-remove="tr"
                     data-confirm="Delete this video? This also removes the local copy and the Google Drive file.">
+              {{ csrf_field() }}
                 <button type="submit" class="btn btn--danger btn--sm">Delete</button>
               </form>
             </td>
           </tr>
           {% else %}
-          <tr><td colspan="8" class="muted">No videos.</td></tr>
+          <tr><td colspan="9" class="muted">No videos.</td></tr>
           {% endfor %}
         </tbody>
       </table>

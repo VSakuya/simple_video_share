@@ -44,6 +44,13 @@ CREATE TABLE IF NOT EXISTS videos (
     status                TEXT    NOT NULL DEFAULT 'ready',
     view_count            INTEGER NOT NULL DEFAULT 0,
     is_pinned             INTEGER NOT NULL DEFAULT 0,
+    -- HLS stream cache (§31.2/§32.2): stream_dir is the path of the segment tree
+    -- relative to storage/videos/, so it stays findable when local_filename is
+    -- dropped by hls_keep_source. stream_state: none/building/repairing/ready/failed.
+    stream_dir            TEXT,
+    stream_state          TEXT    NOT NULL DEFAULT 'none',
+    stream_source         TEXT    NOT NULL DEFAULT '',
+    stream_updated_at     TEXT,
     last_accessed         TEXT,
     created_at            TEXT    NOT NULL DEFAULT (datetime('now')),
     uploaded_at           TEXT    NOT NULL DEFAULT (datetime('now')),

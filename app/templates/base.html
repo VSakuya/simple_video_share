@@ -29,6 +29,10 @@
   <title>{% block title %}Simple Video Share{% endblock %}</title>
   <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/favicon.png') }}">
   <script>window.SVS_BASE = "{{ svs_base }}";</script>
+  <!-- CSRF (28.1/28.2): the session token, published for static/js/csrf.js, -->
+  <!-- which attaches it as X-CSRF-Token to every unsafe same-origin request.  -->
+  <meta name="{{ csrf_meta_name }}" content="{{ csrf_token }}">
+  <script src="{{ url_for('static', filename='js/csrf.js') }}?v={{ static_version }}"></script>
   <script src="{{ url_for('static', filename='js/inpage.js') }}?v={{ static_version }}"></script>
   {% block head %}{% endblock %}
 </head>

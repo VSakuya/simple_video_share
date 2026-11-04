@@ -1,6 +1,11 @@
 {% extends "base.html" %}
 {% block title %}{{ video['title'] }} — Simple Video Share{% endblock %}
 {% block head %}
+<!-- hls.js (31.6, vendored 1.6.12) before DPlayer: DPlayer's "hls" branch reads
+     window.Hls at construction time, so the library has to exist first. -->
+<script src="{{ url_for('static', filename='vendor/hls/hls.min.js') }}?v={{ static_version }}"></script>
+<!-- The source picker shared with Watch Together (31.10). -->
+<script src="{{ url_for('static', filename='js/stream-player.js') }}?v={{ static_version }}"></script>
 <!-- DPlayer (§13.39): single self-contained vendor JS; it injects its own CSS
      and inline SVG icons, so no separate stylesheet or font is required. -->
 <script src="{{ url_for('static', filename='vendor/dplayer/DPlayer.min.js') }}?v={{ static_version }}"></script>
@@ -137,6 +142,10 @@
 (function () {
   'use strict';
   var streamUrl = {{ url_for('watch.stream', video_id=video['id']) | tojson }};
+  // 31.6: HLS is offered only when the server already validated a stream tree,
+  // and the picker still checks whether THIS browser can take it.
+  var hlsUrl = {{ url_for('watch.hls_playlist', video_id=video['id']) | tojson }};
+  var streamState = {{ (video.get('stream_state') or 'none') | tojson }};
   var coverUrl = {{ (url_for('home.cover', filename=video['cover_filename']) if video['cover_filename'] else None) | tojson }};
 
   // Idempotent: called once, either at load (already cached) or from the
@@ -146,13 +155,20 @@
     var container = document.getElementById('dplayer');
     if (!container || container.classList.contains('dplayer')) return;
 
-    new DPlayer({
+    var picked = window.SVS_STREAM.pick({
+      progressiveUrl: streamUrl, hlsUrl: hlsUrl, streamState: streamState
+    });
+    window.watchPlayer = new DPlayer({
       container: container,
       autoplay: false,
       loop: false,
       hotkey: false, // page-level keydown owns Space (avoids a double-toggle)
-      video: { url: streamUrl, type: 'video', pic: coverUrl }
+      video: { url: picked.url, type: picked.type, pic: coverUrl }
     });
+    // 31.6: only hls.js reports per-segment failures, and only it can retry them.
+    if (window.SVS_STREAM.usesHlsJs(picked)) {
+      window.SVS_STREAM.attachRecovery(window.watchPlayer, { label: 'watch' });
+    }
 
     // Match the box to the video's native aspect ratio (no letterbox), the same
     // applyRatio() the old video.js code did: .player-wrap carries the ratio and
@@ -290,6 +306,7 @@
 
   <form method="post" action="{{ url_for('watch.add_comment', video_id=video['id']) }}"
         class="comments__form">
+  {{ csrf_field() }}
     <label for="comment-body" class="upload-label">Comment
       <span class="muted">(plain text — kaomoji welcome)</span></label>
     <div class="kaomoji-bar" id="kaomoji-bar">

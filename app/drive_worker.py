@@ -167,7 +167,7 @@ class DriveUploadWorker:
         app_config: Any,
         resumable_uri: Optional[str] = None,
     ) -> None:
-        from . import db, drive, storage
+        from . import db, drive, hls, storage
         try:
             drive_id = drive.upload_file(
                 local_path,
@@ -188,6 +188,18 @@ class DriveUploadWorker:
                 drive_resumable_uri=None,
             )
             logger.info("worker: video id=%s ready (drive_id=%s)", video_id, drive_id)
+            # §31.5: segment here, on this same thread. This is the one point
+            # where the local MP4 is known-complete AND durably mirrored in Drive,
+            # so hls_keep_source may replace the local copy with its segment tree.
+            # Copy-only remux: about 1 s per 30 s of video, never an encode.
+            try:
+                row = db.get_video_by_id(video_id)
+                if row is not None:
+                    hls.ensure_stream(
+                        Path(videos_dir), row, app_config, reason="post-mirror",
+                    )
+            except Exception as exc:  # noqa: BLE001 - never fails an upload
+                logger.warning("worker: HLS segmentation failed for id=%s: %s", video_id, exc)
             # Free the local copy when the disk is tight (Drive now holds it).
             if storage.free_space_bytes(base_dir) < min_free and os.path.exists(local_path):
                 try:

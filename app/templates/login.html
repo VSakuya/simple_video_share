@@ -4,6 +4,7 @@
 <div class="auth-card">
   <h1>Log in</h1>
   <form method="post" action="{{ url_for('auth.login', next=next) }}">
+  {{ csrf_field() }}
     <label>Username
       <input type="text" name="username" required autofocus>
     </label>

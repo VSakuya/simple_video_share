@@ -21,6 +21,7 @@ from flask import Flask, redirect, request, session, url_for
 from markupsafe import Markup
 
 from . import config as app_config
+from . import csrf as app_csrf
 from . import db
 
 # Register the ES-module extension with a JavaScript MIME type. Python's
@@ -56,6 +57,14 @@ def create_app() -> Flask:
     )
     app.config["SECRET_KEY"] = cfg["secret_key"]
     app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=30)
+    # Session cookie hardening (28.4). These flags were never set explicitly, so
+    # SameSite was whatever the browser defaulted to. ``cookie_secure`` comes from
+    # config.json and defaults to True; browsers treat http://127.0.0.1 as a
+    # secure context, so plain-HTTP local development still gets the session
+    # cookie. Set it to false only when testing over plain HTTP on a LAN address.
+    app.config["SESSION_COOKIE_HTTPONLY"] = True
+    app.config["SESSION_COOKIE_SAMESITE"] = "lax"
+    app.config["SESSION_COOKIE_SECURE"] = bool(cfg.get("cookie_secure", True))
     # Store runtime paths on the app for use by blueprints.
     app.config["VIDEOS_DIR"] = videos_dir
     app.config["COVERS_DIR"] = covers_dir
@@ -65,6 +74,19 @@ def create_app() -> Flask:
     # after a seek before resuming even if a client is still landing. The group
     # resumes as soon as every connected client confirms arrival, capped here.
     app.config["SEEK_SETTLE_SECONDS"] = float(cfg.get("seek_settle_seconds", 60.0))
+    # HLS segmentation of the local cache (§31/§32). One dict so hls.py reads the
+    # feature config in one place; every key falls back to config.py DEFAULTS.
+    app.config["HLS"] = {
+        "enabled": bool(cfg.get("hls_enabled", False)),
+        "repair_enabled": bool(cfg.get("hls_repair_enabled", True)),
+        "segment_seconds": float(cfg.get("hls_segment_seconds", 6)),
+        "keep_source": bool(cfg.get("hls_keep_source", False)),
+        "timeout_seconds": int(cfg.get("hls_timeout_seconds", 600)),
+        "repair_timeout_seconds": int(cfg.get("hls_repair_timeout_seconds", 7200)),
+        "repair_preset": str(cfg.get("hls_repair_preset", "ultrafast")),
+        "repair_crf": int(cfg.get("hls_repair_crf", 26)),
+        "ffmpeg_path": str(cfg.get("ffmpeg_path", "") or ""),
+    }
 
     # Subpath the app is mounted under behind a reverse proxy (e.g. "/video").
     # Normalize: strip trailing slashes, keep the leading slash. "" (or a lone
@@ -84,9 +106,14 @@ def create_app() -> Flask:
     def _static_version() -> str:
         chunks = []
         for rel in (
-            "static/js/inpage.js", "static/js/notify.js",
+            "static/js/inpage.js", "static/js/csrf.js", "static/js/notify.js",
             "static/js/live-player.js", "static/css/style.css",
+            # The upload pipeline scripts joined the hash list (30.1): their encoder
+            # settings are part of what a client must not keep cached.
+            "static/js/edit.js", "static/js/upload.js", "static/js/pipeline.js",
             "static/vendor/mpegts/mpegts.min.js",
+            # 31.6/31.10: the HLS picker and the vendored hls.js it depends on.
+            "static/js/stream-player.js", "static/vendor/hls/hls.min.js",
         ):
             p = _APP_DIR / rel
             if p.is_file():
@@ -112,6 +139,24 @@ def create_app() -> Flask:
         )
     except Exception as exc:  # noqa: BLE001 - startup cleanup is best effort
         app_logger.warning("create_app: startup cache-cap enforce failed: %s", exc)
+
+    # The ffmpeg.wasm Stage-2 fallback asset is deliberately out of git (28.7):
+    # 32 MB in every clone and in every boot-time git pull, while mediabunny
+    # (WebCodecs) is the primary engine. Missing means the fallback fails, not
+    # the upload. See README ("Run") for the one-time copy.
+    if not (_APP_DIR / "static" / "js" / "ffmpeg" / "ffmpeg-core.wasm").is_file():
+        app_logger.warning(
+            "create_app: ffmpeg.wasm fallback asset missing "
+            "(static/js/ffmpeg/ffmpeg-core.wasm). mediabunny transcode still "
+            "works; the ffmpeg.wasm fallback will fail. See README (Run).",
+        )
+
+    # Room presence, upload progress and the watch scheduler live in ONE process,
+    # so a second live instance sharing storage/ would silently break them (28.8).
+    # Advisory: a failed check never blocks startup.
+    from . import runtime_guard
+    for warning in runtime_guard.check(_STORAGE_DIR):
+        app_logger.critical("create_app: %s", warning)
 
     # Register blueprints.
     from .auth import auth_bp
@@ -193,6 +238,13 @@ def create_app() -> Flask:
         from .auth import current_user
         user = current_user()
         return {
+            # CSRF (28.1/28.2): ``csrf_field`` is a callable used as
+            # {{ csrf_field() }} inside every POST form; ``csrf_token`` and
+            # ``csrf_meta_name`` are values, used in base.html as
+            # <meta name="{{ csrf_meta_name }}" content="{{ csrf_token }}">.
+            "csrf_token": app_csrf.get_token(),
+            "csrf_field": app_csrf.csrf_field,
+            "csrf_meta_name": app_csrf.META_NAME,
             "session_username": user["username"] if user else "",
             "user_is_admin": bool(user and user.get("is_admin")),
             "current_user_obj": user,
@@ -208,6 +260,11 @@ def create_app() -> Flask:
             # presence snapshots baked on the live list.
             "unread_notifications": db.unread_count(user["id"]) if user else 0,
         }
+
+    # Registered first: a request rejected for a missing token should cost no
+    # session-driven DB work (the two hooks below each read the session, and one
+    # of them writes).
+    app.before_request(app_csrf.protect)
 
     @app.before_request
     def _enforce_forced_password_change() -> Any:
@@ -264,3 +321,4 @@ def create_app() -> Flask:
         app.wsgi_app = _base_path_wsgi_app
 
     return app
+

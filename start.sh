@@ -24,8 +24,11 @@ PYTHON="${PYTHON:-python3}"
 #    always runs what is on the remote. --ff-only fast-forwards without merge
 #    commits and aborts (see set -e) if the tree has uncommitted edits to
 #    tracked files or the branch has diverged — a half-updated app never starts.
-#    config.json and documents/PROJECT_PROGRESS.md are git-ignored, so the pull
-#    never touches the VPS's live secret_key / drive_folder_id.
+#    config.json is git-ignored, so the pull never touches the VPS live
+#    secret_key / drive_folder_id. documents/PROJECT_PROGRESS.md IS tracked since
+#    2026-11-04: if the copy on the VPS was edited by hand, commit it or move it
+#    aside before the first pull that brings it in, otherwise git aborts with
+#    "untracked working tree file would be overwritten" and this script exits 1.
 #    core.fileMode=false makes git ignore exec-bit changes: a manual chmod on
 #    the VPS no longer registers as a local change that blocks the pull.
 #    (start.sh itself is committed as 100755, so the exec bit is preserved in

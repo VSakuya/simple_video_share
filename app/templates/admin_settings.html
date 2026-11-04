@@ -7,6 +7,7 @@
   <section class="panel">
     <h2>Settings</h2>
     <form id="settings-form" method="post" action="{{ url_for('admin.save_settings') }}" data-async>
+    {{ csrf_field() }}
       <div class="settings-grid">
         <div class="field">
           <label for="setting-default-bitrate">Default bitrate (kbps)</label>
@@ -52,6 +53,23 @@
       </p>
       <button type="submit" class="btn">Save settings</button>
     </form>
+  </section>
+  <section class="panel">
+    <h2>HLS segmentation (read-only)</h2>
+    <p class="muted">
+      These switches live in <code>config.json</code> on purpose (§31.8): one GOP
+      repair costs minutes of single-core CPU, so it must never be one stray form
+      POST away. Per-video actions are on the Videos subpage.
+    </p>
+    <p class="muted">
+      Master switch {{ 'on' if hls_info.enabled else 'off' }} · segment length
+      {{ hls_info.segment_seconds | round(1) }} s · local cache keeps the MP4 too:
+      {{ 'yes' if hls_info.keep_source else 'no (segments only, §31.1)' }}<br>
+      GOP repair {{ 'allowed' if hls_info.repair_enabled else 'disabled' }}
+      (libx264 preset {{ hls_info.preset }}, crf {{ hls_info.crf }}) · ffmpeg: {{ hls_info.ffmpeg }}<br>
+      Stream states: {% for state, count in hls_info.states | dictsort %}{{ state }} {{ count }}{% if not loop.last %} · {% endif %}{% endfor %}
+      {% if not hls_info.total_videos %}none yet{% endif %}
+    </p>
   </section>
 </div>
 {% endblock %}

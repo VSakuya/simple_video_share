@@ -45,3 +45,37 @@ worker.
 ## Run
 
 - Local development: `python main.py`
+
+- Production (Linux VPS): `./start.sh` - pull, create `.venv`, install
+  requirements, then run Waitress. It must stay a single process with many
+  threads: room presence, upload progress and Watch Together state live in
+  process memory, and `app/runtime_guard.py` logs a CRITICAL warning when a
+  multi-worker launcher or a second instance sharing `storage/` shows up.
+- Regression probes: `python testing/run_probes.py` (options `--list`,
+  `--only <name>`, `--timeout <s>`, `--with-node`). Each probe also runs on its
+  own, e.g. `python testing/probe_home_cards.py`.
+
+## Security and dependency notes
+
+- Every POST form carries a CSRF token through `{{ csrf_field() }}`, and
+  `app/static/js/csrf.js` attaches `X-CSRF-Token` to every unsafe same-origin
+  `fetch` / `XMLHttpRequest`. The guard itself is `app/csrf.py`.
+- `cookie_secure` in `config.json` (default `true`) sets the `Secure` flag on the
+  session cookie; `HttpOnly` and `SameSite=Lax` are always set. Keep it `true`
+  unless you test over plain HTTP from another machine on your LAN (browsers
+  treat `http://127.0.0.1` as a secure context, so local development is fine).
+- `requirements.txt` is pinned, because `start.sh` reinstalls it on every deploy
+  - bump a pin deliberately instead of letting an upstream release land by
+  itself. Development-only tools (pyright) are pinned in `requirements-dev.txt`,
+  which `start.sh` never installs.
+
+## The optional 32 MB asset: ffmpeg.wasm
+
+`app/static/js/ffmpeg/ffmpeg-core.wasm` is deliberately **not** in git. Uploads
+transcode in the browser through mediabunny (WebCodecs); ffmpeg.wasm is only the
+Stage-2 fallback for browsers that cannot encode the file. A 32 MB blob in the
+repo would be carried by every clone and every boot-time `git pull`, so a fresh
+clone starts with one warning in the log and the fallback unavailable until the
+file is placed by hand:
+
+    cp /somewhere/ffmpeg-core.wasm app/static/js/ffmpeg/ffmpeg-core.wasm

@@ -11,6 +11,7 @@
            src="{{ url_for('home.avatar_file', filename=current_user_obj['avatar_filename']) if current_user_obj and current_user_obj['avatar_filename'] else url_for('static', filename='img/avatar-default.svg') }}"
            alt="avatar">
       <form method="post" action="{{ url_for('auth.avatar') }}" enctype="multipart/form-data" data-confirm="Upload this avatar?">
+      {{ csrf_field() }}
         <div class="upload-section">
           <label class="upload-label">Avatar image <span class="muted">(square, cropped in your browser)</span></label>
           <div class="upload-cover">
@@ -26,6 +27,7 @@
     <section class="panel">
       <h2>Password</h2>
       <form method="post" action="{{ url_for('auth.account') }}">
+      {{ csrf_field() }}
         <div class="field">
           <label for="account-current-password">Current password</label>
           <input id="account-current-password" type="password" name="current_password" required>
@@ -48,6 +50,7 @@
     {% if me_room %}
     <p class="muted">Your live room appears in the <a href="{{ url_for('live.index') }}">live list</a>. The stream link is the full address the player plays from (an internal <code>/live/&lt;code&gt;.flv</code> or any external URL).</p>
     <form method="post" action="{{ url_for('live.manage_room') }}" enctype="multipart/form-data">
+    {{ csrf_field() }}
       <div class="field">
         <label for="lr-url">Stream link</label>
         <input id="lr-url" name="url" value="{{ me_room['url'] }}" required>
@@ -76,6 +79,7 @@
     {% else %}
     <p class="muted">Create your live room. It will appear in the <a href="{{ url_for('live.index') }}">live list</a>. The stream link is the full address the player plays from (an internal <code>/live/&lt;code&gt;.flv</code> or any external URL).</p>
     <form method="post" action="{{ url_for('live.manage_room') }}" enctype="multipart/form-data">
+    {{ csrf_field() }}
       <div class="field">
         <label for="lr-url">Stream link</label>
         <input id="lr-url" name="url" placeholder="e.g. /live/sample.flv or https://host/live.flv" required>

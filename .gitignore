@@ -40,5 +40,15 @@ storage/
 testing/*
 HANDOFF_mediabunny.md
 *.conf
-documents/PROJECT_PROGRESS.md
+# Everything under documents/ is local working notes EXCEPT the requirements /
+# progress log itself: the project rules make documents/PROJECT_PROGRESS.md the
+# single source of truth, and a source of truth that no one can diff or lose is
+# worse than no source of truth (28.5). Re-include it after the wildcard.
 documents/*
+!documents/PROJECT_PROGRESS.md
+
+# The 32 MB ffmpeg.wasm Stage-2 fallback asset is kept out of git (28.7): it is
+# a browser download for the rare mediabunny failure path, and this repo is
+# cloned and git-pulled (by start.sh) on every deploy. Copy it once by hand -
+# see README ("Run"). create_app logs a warning when it is absent.
+app/static/js/ffmpeg/ffmpeg-core.wasm

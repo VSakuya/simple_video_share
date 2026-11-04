@@ -86,6 +86,33 @@ def _storage_stats() -> dict[str, Any]:
     }
 
 
+def _hls_status() -> dict[str, Any]:
+    """Read-only HLS status for the settings subpage (§31.8).
+
+    The HLS switches deliberately live in config.json rather than this form: one
+    repair costs minutes of single-core CPU per video, so it must never be one
+    stray POST away. What the page shows is what the server can currently do.
+    """
+    from .. import hls
+    cfg = hls.settings(current_app.config)
+    states: dict[str, int] = {}
+    for video in db.list_all_videos():
+        key = str(video.get("stream_state") or "none")
+        states[key] = states.get(key, 0) + 1
+    return {
+        "enabled": cfg["enabled"],
+        "repair_enabled": cfg["repair_enabled"],
+        "segment_seconds": cfg["segment_seconds"],
+        "keep_source": cfg["keep_source"],
+        "ffmpeg": hls.ffmpeg_binary(cfg) or "not found",
+        "preset": cfg["repair_preset"],
+        "crf": cfg["repair_crf"],
+        "states": states,
+        "ready_videos": states.get("ready", 0),
+        "total_videos": sum(states.values()),
+    }
+
+
 def _read_filtered_log(path, level: str) -> list[dict[str, str]]:
     """Read ``path`` and return the lines matching ``level`` (newest last).
 
@@ -147,7 +174,12 @@ def rooms() -> str:
 @admin_required
 def settings() -> str:
     """Global transcode settings + disk / drive / cache stats (§15.5)."""
-    return render_template("admin_settings.html", settings=db.get_all_settings(), **_storage_stats())
+    return render_template(
+        "admin_settings.html",
+        settings=db.get_all_settings(),
+        **_storage_stats(),
+        hls_info=_hls_status(),
+    )
 
 
 @admin_bp.route("/logs")
@@ -330,6 +362,107 @@ def logs_data() -> Any:
     if truncated:
         lines = lines[-_MAX_LOG_LINES:]
     return jsonify(source=source, level=level, total=total, truncated=truncated, lines=lines)
+
+
+def _stream_action(video_id: int, mode: str) -> Any:
+    """Start one stream job for one video, or explain why it was refused (32.3).
+
+    Every refusal is a flash + redirect back to the Videos table, so the reason
+    shows up next to the badge instead of on a blank page. Nothing here runs ffmpeg
+    in the request: hls.start_build hands it to a daemon thread, and ensure_stream
+    owns the per-video lock, so a double click is a no-op rather than a second ffmpeg.
+    """
+    from .. import hls
+    video = db.get_video_by_id(video_id)
+    if video is None:
+        flash("Video not found.", "error")
+        return redirect(url_for("admin.videos"))
+    videos_dir = Path(current_app.config["VIDEOS_DIR"])
+    cfg = hls.settings(current_app.config)
+    if not cfg["enabled"]:
+        flash("HLS is off (hls_enabled = false in config.json).", "error")
+        return redirect(url_for("admin.videos"))
+    if hls.ffmpeg_binary(cfg) is None:
+        flash("ffmpeg was not found on this server, so nothing can be segmented.", "error")
+        return redirect(url_for("admin.videos"))
+    if mode == hls.MODE_REPAIR and not cfg["repair_enabled"]:
+        flash("GOP repair is off (hls_repair_enabled = false in config.json).", "error")
+        return redirect(url_for("admin.videos"))
+    source = hls.source_path_for(videos_dir, video)
+    if source is None:
+        # A stream is derived from the MP4, so a cache-evicted video has to be
+        # pulled back from Drive (its watch page: 'Download & play') before re-cutting.
+        flash(
+            "No local copy on this server: open the video and download it from "
+            "Drive first, then rebuild.",
+            "error",
+        )
+        return redirect(url_for("admin.videos"))
+    if mode == hls.MODE_REPAIR:
+        # 32.4 pre-check; the hard guard lives in hls.ensure_stream. A repair that
+        # is going to run out of disk is refused here rather than 25 minutes in,
+        # while an admin is watching the badge.
+        from .. import storage
+
+        source_bytes = source.stat().st_size
+        needed = int(source_bytes * 1.35)
+        headroom = storage.free_space_bytes(str(videos_dir.parent)) - storage.min_free_space_bytes(
+            current_app.config
+        )
+        if headroom < needed:
+            flash(
+                "Repair needs about %d MB of free headroom for this file, this server "
+                "has %d MB: free cache space first."
+                % (needed // 1048576, max(headroom, 0) // 1048576),
+                "error",
+            )
+            return redirect(url_for("admin.videos"))
+
+    started = hls.start_build(
+        videos_dir, video, current_app.config, mode=mode, reason="admin",
+    )
+    if not started:
+        flash("Could not start the stream job.", "error")
+    elif mode == hls.MODE_REPAIR:
+        flash(
+            "GOP repair started - one core, roughly 1 s per second of video. "
+            "Refresh the table for the badge.",
+            "success",
+        )
+    else:
+        flash(
+            "Stream rebuild started (copy-only remux). If the source keyframe "
+            "interval is longer than the segment target the tree is discarded and "
+            "the badge stays 'none' - that video needs Repair GOP.",
+            "success",
+        )
+    return redirect(url_for("admin.videos"))
+
+
+@admin_bp.route("/videos/<int:video_id>/stream/rebuild", methods=["POST"])
+@admin_required
+def rebuild_stream(video_id: int) -> Any:
+    """Re-cut the HLS stream of one video, copy-only (§31.1, §32.3).
+
+    No re-encode: seconds of wall time per 30 s of video. It only produces useful
+    segments when the source already has a short keyframe interval, i.e. anything
+    encoded after the 30.1 pipeline fix.
+    """
+    return _stream_action(video_id, "copy")
+
+
+@admin_bp.route("/videos/<int:video_id>/stream/repair", methods=["POST"])
+@admin_required
+def repair_stream(video_id: int) -> Any:
+    """GOP repair of one video (32.1): re-encode to H.264 with a short keyframe
+    interval, then segment that copy-only.
+
+    Admin-triggered only (32.2) - it costs roughly 1 s of single-core CPU per second
+    of video. The Google Drive original and every DB field (title, tags, cover,
+    comments, folder) stay untouched, which is exactly what makes this the
+    no-re-upload path for the existing library.
+    """
+    return _stream_action(video_id, "repair")
 
 
 @admin_bp.route("/videos/<int:video_id>/pin", methods=["POST"])

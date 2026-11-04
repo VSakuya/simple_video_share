@@ -79,6 +79,24 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute(_sql("migrations", "videos_add_drive_resumable_uri"))
     if "is_pinned" not in video_cols:
         conn.execute(_sql("migrations", "videos_add_pinned"))
+    if "stream_state" not in video_cols:
+        # HLS bookkeeping (§31.2/§32.2): one migration file carries all four
+        # columns, so a live DB gains them in one step.
+        conn.executescript(_sql("migrations", "videos_add_stream_state"))
+    else:
+        half = [
+            name for name in ("stream_dir", "stream_source", "stream_updated_at")
+            if name not in video_cols
+        ]
+        if half:
+            # SQLite has no ADD COLUMN IF NOT EXISTS, so the migration file cannot
+            # be replayed against a table that already has some of the columns. A
+            # half-installed set only comes from hand-edits: name the missing
+            # columns now instead of failing later inside the HLS code.
+            raise RuntimeError(
+                "videos table has stream_state but is missing " + ", ".join(half)
+                + ": run ALTER TABLE videos ADD COLUMN <name> for each one."
+            )
 
     comment_cols = {row[1] for row in conn.execute("PRAGMA table_info(comments)").fetchall()}
     if "parent_id" not in comment_cols:
@@ -236,10 +254,51 @@ def count_users() -> int:
     return int(row[0]) if row else 0
 
 
+#: Columns ``update_user`` / ``update_video`` may write, kept in step with
+#: ``sql/schema.sql``. See :func:`_set_columns` for why the names need a whitelist.
+_ALLOWED_UPDATE_COLUMNS: dict[str, frozenset[str]] = {
+    "users": frozenset({
+        "username", "password_hash", "is_admin", "avatar_filename",
+        "must_change_password", "last_login_at",
+    }),
+    "videos": frozenset({
+        "title", "description", "owner_id", "folder_id", "google_drive_file_id",
+        "drive_path", "drive_filename", "drive_resumable_uri", "local_filename",
+        "cover_filename", "duration", "resolution", "codec", "bitrate", "fps",
+        "size_bytes", "status", "view_count", "is_pinned", "last_accessed",
+        "created_at", "uploaded_at",
+        # HLS stream bookkeeping (§31.2/§32.2): update_video must accept these too,
+        # exactly like every other column it writes.
+        "stream_dir", "stream_state", "stream_source", "stream_updated_at",
+    }),
+}
+
+
+def _set_columns(table: str, kwargs: dict[str, Any]) -> str:
+    """Build a SET clause, refusing any column name that is not whitelisted.
+
+    ``update_user`` and ``update_video`` take the columns to write as keyword
+    arguments, so the *names* are interpolated into the SQL text (only the values
+    are bound as parameters). Every caller today passes literal keywords, which
+    is why this is safe - but it is safe by convention, and one caller that ever
+    forwarded a request-supplied key would open a SQL-injection hole. The
+    whitelist makes that unrepresentable: an unexpected name raises before the
+    statement is ever built.
+    """
+    allowed = _ALLOWED_UPDATE_COLUMNS[table]
+    unexpected = sorted(set(kwargs) - allowed)
+    if unexpected:
+        raise ValueError(
+            "%s: refusing to update unknown column(s): %s"
+            % (table, ", ".join(unexpected))
+        )
+    return ", ".join(f"{k} = ?" for k in kwargs)
+
+
 def update_user(user_id: int, **kwargs: Any) -> None:
     if not kwargs:
         return
-    sets = ", ".join(f"{k} = ?" for k in kwargs)
+    sets = _set_columns("users", kwargs)
     vals = list(kwargs.values()) + [user_id]
     conn = get_db()
     conn.execute(_sql("users", "update").replace("{set_clause}", sets), vals)
@@ -562,6 +621,27 @@ def list_cached_local_names() -> list[str]:
     conn.close()
     return [row["local_filename"] for row in rows]
 
+def list_cache_paths() -> list[dict[str, Any]]:
+    """Every on-disk cache entry: the local MP4 name and/or its stream tree.
+
+    The cache became folder-aware (§31.4), so the accounting needs both paths per
+    row: a video can live as ``<hash>/<hash>.mp4``, as ``<hash>/stream``, or as
+    both while the MP4 has not been dropped yet.
+    """
+    conn = get_db()
+    rows = conn.execute(
+        _sql("videos", "list_cache_paths")
+    ).fetchall()
+    conn.close()
+    return [
+        {
+            "local_filename": row["local_filename"],
+            "stream_dir": row["stream_dir"],
+        }
+        for row in rows
+    ]
+
+
 
 def sum_cached_bytes() -> int:
     """Return the total recorded size of locally-cached videos (bytes).
@@ -590,7 +670,7 @@ def list_videos_by_owner(owner_id: int) -> list[dict[str, Any]]:
 def update_video(video_id: int, **kwargs: Any) -> None:
     if not kwargs:
         return
-    sets = ", ".join(f"{k} = ?" for k in kwargs)
+    sets = _set_columns("videos", kwargs)
     vals = list(kwargs.values()) + [video_id]
     conn = get_db()
     conn.execute(_sql("videos", "update").replace("{set_clause}", sets), vals)

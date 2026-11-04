@@ -17,6 +17,7 @@
         <div class="live-room-card__owner">{{ room['owner_username'] }}</div>
         <form method="post" action="{{ url_for('admin.delete_live_room', room_id=room['id']) }}"
               data-async data-async-remove=".live-room-card" data-confirm="Delete this live room?">
+        {{ csrf_field() }}
           <button type="submit" class="btn btn--danger btn--sm">Delete</button>
         </form>
       </div>
