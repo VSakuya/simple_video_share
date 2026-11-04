@@ -15,7 +15,7 @@ There is exactly one batch slot per process. On a 1 vCPU / 956 MiB server a batc
 parallel ffmpegs is the OOM story 32.0 already measured with libsvtav1, so the queue
 is strictly sequential and :func:`start` refuses while a batch runs. The queue lives
 in process memory only: a restart abandons it and leaves the row that was mid-build at
-``building`` / ``repairing`` (36.5).
+``building`` / ``repairing``; startup recovery releases those stale states.
 """
 
 from __future__ import annotations
@@ -336,7 +336,10 @@ def _run(videos_dir: Path, app_config: Any, mode: str, video_ids: list[int]) -> 
             logger.exception("batch: id=%s raised", video_id)
             _record(video_id, "failed", "crashed: %s" % exc)
             continue
-        if state == hls.STATE_READY:
+        job = hls.progress(videos_dir, video_id)
+        if job.get("error"):
+            _record(video_id, "failed", str(job["error"]))
+        elif state == hls.STATE_READY:
             _record(video_id, "ready", "")
         elif state == hls.STATE_NONE:
             # 32.5: a copy cut of a sparse-GOP source is valid HLS and useless to

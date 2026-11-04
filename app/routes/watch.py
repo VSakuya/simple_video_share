@@ -99,7 +99,7 @@ def _validated_stream_dir(video: dict[str, Any]) -> Optional[Path]:
     missing segments.
     """
     from .. import hls
-    if str(video.get("stream_state") or "") != hls.STATE_READY:
+    if str(video.get("stream_state") or "") not in (hls.STATE_READY, hls.STATE_BUILDING, hls.STATE_REPAIRING):
         return None
     stream_dir = _stream_dir(video)
     if stream_dir is None:
@@ -471,10 +471,13 @@ def hls_playlist(video_id: int) -> Any:
     if stream_dir is None:
         abort(404)
     db.touch_video(video_id)
-    response = send_file(
-        stream_dir / hls.PLAYLIST_NAME,
-        mimetype="application/vnd.apple.mpegurl",
-    )
+    from flask import Response
+    import re
+    text = (stream_dir / hls.PLAYLIST_NAME).read_text(encoding="utf-8")
+    version = stream_dir.name
+    text = re.sub(r'URI="([^"]+)"', lambda m: 'URI="' + m.group(1) + '?v=' + version + '"', text)
+    text = "\n".join(line + "?v=" + version if line and not line.startswith("#") else line for line in text.splitlines()) + "\n"
+    response = Response(text, mimetype="application/vnd.apple.mpegurl")
     response.headers["Cache-Control"] = "private, no-cache"
     return response
 
@@ -497,6 +500,13 @@ def hls_asset(video_id: int, asset: str) -> Any:
     stream_dir = _stream_dir(video)
     if stream_dir is None:
         abort(404)
+    version = request.args.get("v", "")
+    if version:
+        import re
+        root = stream_dir.name.split(".gen-")[0]
+        if not re.fullmatch(re.escape(root) + r"(?:\.gen-[0-9a-f]{32})?", version):
+            abort(404)
+        stream_dir = stream_dir.parent / version
     allowed = hls.playlist_segment_names(stream_dir)
     init_name = hls.playlist_init_name(stream_dir)
     if asset != init_name and asset not in allowed:

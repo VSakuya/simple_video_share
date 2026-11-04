@@ -5224,3 +5224,23 @@ no. Same guard proof: `admin.py` back on `bool(row.get("local_filename"))` fails
   repair path as built.
 - 37.6 stands unchanged: orphans left by earlier deletes are still unreclaimed, and
   `drive.delete_file` is still verified only by the arguments it was called with.
+
+### 2026-11-05 — Upload integrity and HLS repair progress
+
+- Upload sessions bind to a SHA-256 fingerprint of ordered part digests. Parts use
+  temporary files, exact-size/checksum validation and atomic publication; resume
+  revalidates persisted parts. Legacy sessions without fingerprints restart safely.
+- Cross-worker OS locks serialize intake space checks/writes and finish requests.
+  Completed upload receipts survive retries for seven days; abandoned sessions expire
+  at startup/new uploads. Added an owner-checked cancellation endpoint.
+- Fixed HTTP/network retry classification and added upload timeouts and longer busy retries.
+- HLS builds publish validated immutable generations through the DB pointer, retaining
+  the previous generation for existing players. Playlist URLs pin their generation.
+  Cache accounting/eviction includes retired generations; startup prunes those older
+  than a day. Failed rebuilds preserve playback, and startup recovers interrupted jobs.
+- Admin video rows poll persistent job progress every two seconds. FFmpeg processed
+  timestamps drive the encoding/segmenting percentage (100% only after completion);
+  unknown durations show processed seconds. Errors remain visible after refresh.
+- Validation: nine isolated Python regression tests (including real FFmpeg, old-version
+  playback, restart recovery and authenticated admin rendering), Node retry checks,
+  JavaScript syntax checks and pyright. No live videos or Drive objects changed.

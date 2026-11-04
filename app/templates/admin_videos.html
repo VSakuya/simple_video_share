@@ -52,7 +52,7 @@
         </thead>
         <tbody>
           {% for video in videos %}
-          <tr class="admin-video-row">
+          <tr class="admin-video-row" data-video-id="{{ video['id'] }}">
             <td class="vt-cover">
               <img class="row-cover"
                    src="{{ url_for('home.cover', filename=video['cover_filename']) if video['cover_filename'] else url_for('static', filename='img/video-default.svg') }}"
@@ -82,6 +82,10 @@
               <span class="card__tag" data-stream-state title="HLS stream state (31.1)">
                 {{ stream_state }}{% if stream_state == 'ready' and video['stream_source'] %} · {{ video['stream_source'] }}{% endif %}
               </span>
+              <div data-repair-progress hidden aria-live="polite">
+                <progress data-repair-bar max="100" style="width:100%"></progress>
+                <small data-repair-label></small>
+              </div>
             </td>
             <td>
               <span class="pin-badge" data-pin-badge{% if not video['is_pinned'] %} hidden{% endif %}>
@@ -127,6 +131,33 @@
     </div>
   </section>
   <script>
+    (function () {
+      var url = {{ url_for('admin.stream_progress') | tojson }};
+      var stages = {queued:'Queued', preparing:'Preparing', encoding:'Repairing video', segmenting:'Building segments', complete:'Completed', failed:'Failed', interrupted:'Interrupted'};
+      async function pollRepairs() {
+        try {
+          if (document.hidden) return;
+          var response = await fetch(url, {cache:'no-store'});
+          if (!response.ok) return;
+          var data = await response.json();
+          (data.jobs || []).forEach(function (job) {
+            var row = document.querySelector('[data-video-id="' + job.video_id + '"]');
+            if (!row) return;
+            var box = row.querySelector('[data-repair-progress]');
+            box.hidden = false;
+            var bar = box.querySelector('[data-repair-bar]');
+            if (job.percent == null) bar.removeAttribute('value');
+            else bar.value = job.percent;
+            bar.hidden = !job.running;
+            box.querySelector('[data-repair-label]').textContent = (stages[job.stage] || job.stage) +
+              (job.percent == null ? (job.processed_seconds ? ' · ' + Math.floor(job.processed_seconds) + ' s processed' : '') : ' · ' + job.percent + '%') + (job.error ? ': ' + job.error : '');
+            row.querySelector('[data-stream-state]').textContent = job.stream_state || 'none';
+          });
+        } catch (_) { /* retry on next poll */ }
+        finally { window.setTimeout(pollRepairs, 2000); }
+      }
+      pollRepairs();
+    })();
     // Admin videos upload-time column (§16.13c): convert data-ts (UTC) to the
     // viewer's local timezone (24-hour clock), same as My Videos.
     (function () {

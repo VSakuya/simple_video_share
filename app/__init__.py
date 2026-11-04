@@ -130,7 +130,10 @@ def create_app() -> Flask:
     # files are still on disk, so the Drive upload continues in the background)
     # and enforce the admin cache-capacity cap on the cached files already on
     # disk.
-    from . import drive_worker, storage
+    from . import drive_worker, storage, hls
+    hls.recover_jobs(videos_dir)
+    from .routes.upload import cleanup_segments
+    cleanup_segments(videos_dir)
     drive_worker.worker.resume_incomplete(videos_dir, app.config)
     try:
         storage.enforce_cache_limit(

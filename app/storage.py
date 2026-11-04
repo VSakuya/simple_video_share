@@ -84,6 +84,16 @@ def _entry_bytes(base: str, rel: str | None) -> int:
         return 0  # entry missing (not migrated / deleted) -> contributes 0
 
 
+def _stream_versions(base: Path, rel: str | None) -> list[Path]:
+    if not rel:
+        return []
+    path = base / rel
+    root = path.name.split(".gen-")[0]
+    return [p for p in path.parent.glob(root + "*")
+            if p.name == root or (p.name.startswith(root + ".gen-") and
+                len(p.name.removeprefix(root + ".gen-")) == 32)]
+
+
 def actual_cache_bytes(videos_dir) -> int:
     """Total size (bytes) of everything cached on disk: MP4 copies and streams.
 
@@ -95,7 +105,7 @@ def actual_cache_bytes(videos_dir) -> int:
     total = 0
     for entry in db.list_cache_paths():
         total += _entry_bytes(base, entry.get("local_filename"))
-        total += _entry_bytes(base, entry.get("stream_dir"))
+        total += sum(_entry_bytes(base, str(p.relative_to(base))) for p in _stream_versions(Path(base), entry.get("stream_dir")))
     return total
 
 
@@ -162,6 +172,8 @@ def _next_evict_candidate(
             continue
         if video["id"] in protected_set:
             continue
+        if video.get("stream_state") in ("building", "repairing"):
+            continue
         if video.get("status") == "uploading":
             continue
         return video
@@ -206,7 +218,9 @@ def _evict(video: dict, base_dir: str, app_config: Optional[dict] = None) -> Non
     longer on disk.
     """
     videos_dir = Path(base_dir) / "videos"
-    for rel in (video.get("local_filename"), video.get("stream_dir")):
+    paths = [video.get("local_filename")]
+    paths.extend(str(p.relative_to(videos_dir)) for p in _stream_versions(videos_dir, video.get("stream_dir")))
+    for rel in paths:
         if not rel:
             continue
         path = videos_dir / str(rel)
@@ -242,7 +256,7 @@ def cache_footprint(base_dir: str, video: dict) -> int:
     videos_dir = str(Path(base_dir) / "videos")
     return (
         _entry_bytes(videos_dir, video.get("local_filename"))
-        + _entry_bytes(videos_dir, video.get("stream_dir"))
+        + sum(_entry_bytes(videos_dir, str(p.relative_to(videos_dir))) for p in _stream_versions(Path(videos_dir), video.get("stream_dir")))
     )
 
 
@@ -342,7 +356,7 @@ def has_local_media(videos_dir, video: dict) -> bool:
     if local and (base / str(local)).is_file():
         return True
     from . import hls  # lazy import: storage stays importable on its own
-    if str(video.get("stream_state") or "") != hls.STATE_READY:
+    if str(video.get("stream_state") or "") not in (hls.STATE_READY, hls.STATE_BUILDING, hls.STATE_REPAIRING):
         return False
     stream_dir = hls.stream_dir_for(base, video)
     return bool(stream_dir) and (stream_dir / hls.PLAYLIST_NAME).is_file()
@@ -360,7 +374,7 @@ def is_locally_playable(videos_dir, video: dict) -> bool:
     if local and os.path.exists(os.path.join(base, str(local))):
         return True
     from . import hls  # lazy import: storage stays importable on its own
-    if str(video.get("stream_state") or "") != hls.STATE_READY:
+    if str(video.get("stream_state") or "") not in (hls.STATE_READY, hls.STATE_BUILDING, hls.STATE_REPAIRING):
         return False
     stream_dir = hls.stream_dir_for(Path(base), video)
     if stream_dir is None:

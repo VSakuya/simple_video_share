@@ -562,7 +562,7 @@ def _stream_action(video_id: int, mode: str) -> Any:
     elif mode == hls.MODE_REPAIR:
         flash(
             "GOP repair started - one core, roughly 1 s per second of video. "
-            "Refresh the table for the badge.",
+            "Progress is shown in the Stream column.",
             "success",
         )
     else:
@@ -731,6 +731,21 @@ def stream_batch_status() -> Any:
     from .. import batch
 
     return jsonify(batch.status())
+
+
+@admin_bp.route("/videos/stream/progress")
+@admin_required
+def stream_progress() -> Any:
+    from .. import hls
+    base = Path(current_app.config["VIDEOS_DIR"])
+    jobs = []
+    for video in db.list_all_videos():
+        job = hls.progress(base, int(video["id"]))
+        if job.get("stage") != "idle":
+            jobs.append(dict(job, video_id=video["id"], stream_state=video.get("stream_state")))
+    response = jsonify(jobs=jobs)
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @admin_bp.route("/export")

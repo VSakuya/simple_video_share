@@ -36,6 +36,11 @@ Invariants this module is responsible for:
 from __future__ import annotations
 
 import logging
+import json
+import time
+import uuid
+from contextlib import ExitStack
+from .filelock import file_lock, LockBusy, replace_file
 from datetime import datetime, timezone
 import os
 import re
@@ -85,6 +90,7 @@ _locks_guard = threading.Lock()
 _video_locks: dict[int, threading.Lock] = {}
 #: Only one CPU-bound repair may run at a time on a 1 vCPU server.
 _repair_slot = threading.Lock()
+_job_context = threading.local()
 
 
 class StreamError(RuntimeError):
@@ -366,6 +372,17 @@ def _run_ffmpeg(
     project root, so validate_stream rejected a build whose segments were all
     correct. Running inside the stream directory keeps every output together.
     """
+    job = getattr(_job_context, "job", None)
+    if job:
+        base, video_id, duration, mode = job
+        output = _job_path(base, video_id).with_suffix(".progress")
+        output.unlink(missing_ok=True)
+        encoding = "repair encode" in why
+        offset, weight = (0, 95) if encoding else ((95, 4) if mode == MODE_REPAIR else (0, 99))
+        _write_job(base, video_id, running=True, stage="encoding" if encoding else "segmenting",
+                   duration=duration, offset=offset, weight=weight)
+        # Insert before the final output; works with the optional nice prefix.
+        argv = argv[:-1] + ["-progress", str(output.resolve()), "-nostats", argv[-1]]
     logger.info("hls: %s: %s", why, " ".join(argv))
     try:
         proc = subprocess.run(
@@ -446,7 +463,100 @@ def _fps_of(video: dict[str, Any]) -> float:
 # --------------------------------------------------------------------------
 # the one public entry point
 # --------------------------------------------------------------------------
-def ensure_stream(
+def _job_path(base: Path, video_id: int) -> Path:
+    return base / ".hls-jobs" / f"{video_id}.json"
+
+
+def _write_job(base: Path, video_id: int, **values: Any) -> None:
+    path = _job_path(base, video_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_suffix(".tmp")
+    temp.write_text(json.dumps(values), encoding="utf-8")
+    replace_file(temp, path)
+
+
+def progress(base: Path, video_id: int) -> dict[str, Any]:
+    try:
+        job = json.loads(_job_path(base, video_id).read_text(encoding="utf-8"))
+        if job.get("running"):
+            seconds = 0.0
+            output = _job_path(base, video_id).with_suffix(".progress")
+            if output.exists():
+                for line in output.read_text(encoding="utf-8", errors="replace").splitlines():
+                    if line.startswith("out_time_us="):
+                        try:
+                            seconds = max(seconds, float(line.split("=", 1)[1]) / 1e6)
+                        except ValueError:
+                            pass
+            duration = float(job.get("duration") or 0)
+            ratio = min(1.0, seconds / duration) if duration > 0 else 0
+            job["percent"] = min(99, round(job.get("offset", 0) + ratio * job.get("weight", 0))) if duration > 0 else None
+            job["processed_seconds"] = seconds
+        return job
+    except (OSError, ValueError, TypeError):
+        return {"running": False, "stage": "idle", "percent": None}
+
+
+def recover_jobs(base: Path) -> None:
+    for video in db.list_all_videos():
+        tree = stream_dir_for(base, video)
+        if tree and video.get("stream_state") not in (STATE_BUILDING, STATE_REPAIRING):
+            root = tree.name.split(".gen-")[0]
+            for retired in tree.parent.glob(root + "*"):
+                if retired != tree and (retired.name == root or re.fullmatch(re.escape(root) + r"\.gen-[0-9a-f]{32}", retired.name)):
+                    if time.time() - retired.stat().st_mtime > 86400:
+                        _rmtree_quiet(retired)
+        if video.get("stream_state") not in (STATE_BUILDING, STATE_REPAIRING) and not progress(base, int(video["id"])).get("running"):
+            continue
+        video_id = int(video["id"])
+        try:
+            with file_lock(base / ".hls-jobs" / f"{video_id}.lock"):
+                tree = stream_dir_for(base, video)
+                ready = tree is not None and validate_stream(tree, video.get("duration"))[0]
+                db.update_video(video_id, stream_state=STATE_READY if ready else STATE_FAILED)
+                if tree:
+                    _rmtree_quiet(tree.parent / (tree.name + TMP_SUFFIX))
+                    root = tree.name.split(".gen-")[0]
+                    for abandoned in tree.parent.glob(root + ".gen-*.tmp"):
+                        _rmtree_quiet(abandoned)
+                _write_job(base, video_id, running=False, stage="interrupted", percent=None,
+                           error="Server restarted; retry the repair.")
+        except LockBusy:
+            continue
+
+
+def ensure_stream(videos_dir, video, app_config, *, mode=MODE_COPY, reason="") -> str:
+    base = Path(videos_dir)
+    video_id = int(video["id"])
+    try:
+        with ExitStack() as locks:
+            locks.enter_context(file_lock(base / ".hls-jobs" / f"{video_id}.lock"))
+            if mode == MODE_REPAIR:
+                try:
+                    locks.enter_context(file_lock(base / ".hls-jobs" / "repair.lock"))
+                except LockBusy:
+                    _write_job(base, video_id, running=False, stage="failed", percent=None,
+                               error="Another repair is running; retry when it finishes.")
+                    return str(video.get("stream_state") or STATE_NONE)
+            # The caller may have queued a stale snapshot before another build finished.
+            video = db.get_video_by_id(video_id) or video
+            _job_context.job = (base, video_id, video.get("duration"), mode)
+            try:
+                _write_job(base, video_id, running=True, stage="preparing", percent=0,
+                           duration=video.get("duration"), offset=0, weight=0)
+                result = _ensure_stream(base, video, app_config, mode=mode, reason=reason)
+                failed = getattr(_job_context, "error", None)
+                _write_job(base, video_id, running=False, stage="failed" if failed or result == STATE_FAILED else "complete",
+                           percent=None if failed or result == STATE_FAILED else 100, state=result, error=failed)
+                return result
+            finally:
+                _job_context.job = None
+                _job_context.error = None
+    except LockBusy:
+        return str(video.get("stream_state") or STATE_NONE)
+
+
+def _ensure_stream(
     videos_dir: Path | str,
     video: dict[str, Any],
     app_config: Any,
@@ -499,6 +609,10 @@ def ensure_stream(
         logger.info("hls: id=%s has no local MP4 to segment", video_id)
         return state_now
 
+    old_valid = validate_stream(stream_dir, video.get("duration"))[0]
+    root_name = stream_dir.name.split(".gen-")[0]
+    publish_dir = stream_dir.parent / (root_name + ".gen-" + uuid.uuid4().hex)
+    tmp_dir = publish_dir.with_name(publish_dir.name + TMP_SUFFIX)
     busy = STATE_REPAIRING if mode == MODE_REPAIR else STATE_BUILDING
     lock = _video_lock(video_id)
     if not lock.acquire(blocking=False):
@@ -532,7 +646,6 @@ def ensure_stream(
             )
 
         db.update_video(video_id, stream_state=busy)
-        tmp_dir = stream_dir.parent / (stream_dir.name + TMP_SUFFIX)
         _rmtree_quiet(tmp_dir)
         tmp_dir.mkdir(parents=True, exist_ok=True)
         playlist = tmp_dir / PLAYLIST_NAME
@@ -563,15 +676,12 @@ def ensure_stream(
         ok, why = validate_stream(tmp_dir, video.get("duration"))
         if not ok:
             _rmtree_quiet(tmp_dir)
-            db.update_video(video_id, stream_state=STATE_FAILED, stream_dir=None)
-            logger.error("hls: id=%s stream rejected: %s", video_id, why)
-            return STATE_FAILED
+            raise StreamError("Stream validation failed: " + why)
 
         longest = longest_segment_seconds(tmp_dir)
         target = float(cfg["segment_seconds"])
         if (
             mode == MODE_COPY
-            and state_now != STATE_READY
             and longest > target * _GOP_BOUND_RATIO
         ):
             # 32.5: a sparse-GOP source produces a playlist that is technically
@@ -580,12 +690,10 @@ def ensure_stream(
             # duplicate of the MP4. Throwing it away keeps progressive playback
             # (the MP4 stays) and leaves an honest 'none' badge for Repair GOP.
             _rmtree_quiet(tmp_dir)
-            db.update_video(
-                video_id,
-                stream_state=STATE_NONE,
-                stream_dir=None,
-                stream_source="",
-            )
+            if old_valid:
+                db.update_video(video_id, stream_state=STATE_READY)
+                return STATE_READY
+            db.update_video(video_id, stream_state=STATE_NONE, stream_dir=None, stream_source="")
             logger.info(
                 "hls: id=%s copy-only tree discarded: longest segment %.1fs against "
                 "a %.0fs target means a keyframe interval of the same length; keeping "
@@ -607,9 +715,8 @@ def ensure_stream(
                     "hls: id=%s could not delete %s: %s", video_id, scaffold, exc
                 )
 
-        if stream_dir.exists():
-            _rmtree_quiet(stream_dir)
-        tmp_dir.rename(stream_dir)
+        tmp_dir.rename(publish_dir)
+        stream_dir = publish_dir
         db.update_video(
             video_id,
             stream_dir=_relative(base, stream_dir),
@@ -644,11 +751,15 @@ def ensure_stream(
             return STATE_READY
         _drop_local_source(base, db.get_video_by_id(video_id) or video, cfg, reason)
         return STATE_READY
-    except StreamError as exc:
+    except Exception as exc:
         logger.error("hls: id=%s build failed: %s", video_id, exc)
-        _rmtree_quiet(stream_dir.parent / (stream_dir.name + TMP_SUFFIX))
-        db.update_video(video_id, stream_state=STATE_FAILED)
-        return STATE_FAILED
+        _job_context.error = str(exc)
+        _rmtree_quiet(tmp_dir)
+        current = db.get_video_by_id(video_id) or video
+        current_dir = stream_dir_for(base, current)
+        usable = current_dir is not None and validate_stream(current_dir, current.get("duration"))[0]
+        db.update_video(video_id, stream_state=STATE_READY if usable else STATE_FAILED)
+        return STATE_READY if usable else STATE_FAILED
     finally:
         if holding_repair_slot:
             _repair_slot.release()

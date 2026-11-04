@@ -590,9 +590,11 @@ function xhrPost(url, body, onProgress) {
       let j = null;
       try { j = JSON.parse(xhr.responseText); } catch { /* non-JSON body */ }
       if (xhr.status >= 200 && xhr.status < 300 && j && j.ok) resolve(j);
-      else reject(new Error((j && j.error) || "Upload failed (" + xhr.status + ")"));
+      else reject(Object.assign(new Error((j && j.error) || "Upload failed (" + xhr.status + ")"), {status: xhr.status}));
     };
-    xhr.onerror = () => reject(new Error("Network error during upload"));
+    xhr.timeout = 10 * 60 * 1000;
+    xhr.ontimeout = () => reject(new TypeError("Upload timed out"));
+    xhr.onerror = () => reject(new TypeError("Network error during upload"));
     xhr.send(body);
   });
 }
@@ -639,7 +641,7 @@ function addMeta(fd, info) {
   }
 }
 
-// Upload a final Blob (single POST, or split into <=512 MB segments).
+// Upload a final Blob (single POST, or split into 64 MB segments).
 // `meta` = { title, description, folderId, cover, info } (info is the re-probed
 // output metadata used for the stored duration/resolution/bitrate/fps).
 // §bug L67: append the chosen tags (meta.tagIds) to the upload FormData. The
@@ -653,30 +655,29 @@ function sleep(ms) {
 }
 
 function isRetriableUploadError(err) {
-  const msg = err && err.message ? String(err.message) : "";
-  if (msg.includes("Network error during upload")) return true;
-  return /\bUpload failed \((408|429|500|502|503|504)\)\b/.test(msg);
+  return err instanceof TypeError || [408, 409, 429, 500, 502, 503, 504].includes(err && err.status);
 }
 
 async function retryUpload(op, label, log) {
   let lastErr = null;
-  for (let attempt = 1; attempt <= SEGMENT_RETRY_MAX; attempt++) {
+  for (let attempt = 1; attempt <= 30; attempt++) {
     try {
       return await op();
     } catch (err) {
       lastErr = err;
-      if (!isRetriableUploadError(err) || attempt >= SEGMENT_RETRY_MAX) break;
-      const waitMs = SEGMENT_RETRY_BASE_MS * attempt;
-      if (log) log("warn", label + " failed (" + (err.message || err) + "), retry " + (attempt + 1) + "/" + SEGMENT_RETRY_MAX + " in " + waitMs + " ms");
+      const limit = err.status === 409 ? 30 : SEGMENT_RETRY_MAX;
+      if (!isRetriableUploadError(err) || attempt >= limit) break;
+      const waitMs = SEGMENT_RETRY_BASE_MS * Math.min(attempt, 5);
+      if (log) log("warn", label + " failed (" + (err.message || err) + "), retry " + (attempt + 1) + "/" + limit + " in " + waitMs + " ms");
       await sleep(waitMs);
     }
   }
   throw lastErr || new Error(label + " failed");
 }
 
-function resumeKey(meta, sizeBytes, totalParts) {
+function resumeKey(meta, sizeBytes, totalParts, fingerprint) {
   const tagSig = (meta.tagIds || []).join(",");
-  return "svs-seg-resume-v1|" + [meta.title || "", String(meta.folderId || ""), String(sizeBytes), String(totalParts), tagSig].join("|");
+  return "svs-seg-resume-v1|" + [meta.title || "", String(meta.folderId || ""), String(sizeBytes), String(totalParts), tagSig, fingerprint].join("|");
 }
 
 function loadResumeToken(key) {
@@ -716,7 +717,14 @@ export async function uploadVideo(blob, meta, ctx) {
     }
   }
   const totalParts = Math.ceil(blob.size / SEGMENT_SIZE);
-  const rKey = resumeKey(meta, blob.size, totalParts);
+  ctx.setProgress(0, "Checking file integrity…");
+  const hex = (buffer) => Array.from(new Uint8Array(buffer), b => b.toString(16).padStart(2, "0")).join("");
+  const checksums = [];
+  for (let i = 0; i < totalParts; i++) {
+    checksums.push(hex(await crypto.subtle.digest("SHA-256", await blob.slice(i * SEGMENT_SIZE, (i + 1) * SEGMENT_SIZE).arrayBuffer())));
+  }
+  const fingerprint = hex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(checksums.join(""))));
+  const rKey = resumeKey(meta, blob.size, totalParts, fingerprint);
   const oldToken = loadResumeToken(rKey);
   log("info", "Uploading (segmented) " + totalParts + " part(s) of " + fmtMB(blob.size));
   const start = await retryUpload(
@@ -730,12 +738,13 @@ export async function uploadVideo(blob, meta, ctx) {
           expected_size: String(blob.size),
           folder_id: meta.folderId || "",
           resume_token: oldToken,
+          fingerprint,
         }),
       });
       let j = null;
       try { j = await res.json(); } catch { /* non-JSON body */ }
       if (res.status >= 200 && res.status < 300 && j && j.ok) return j;
-      throw new Error((j && j.error) || "Upload failed (" + res.status + ")");
+      throw Object.assign(new Error((j && j.error) || "Upload failed (" + res.status + ")"), {status: res.status});
     },
     "seg_start",
     log
@@ -752,6 +761,7 @@ export async function uploadVideo(blob, meta, ctx) {
     const fd = new FormData();
     fd.append("token", token);
     fd.append("part_index", String(i));
+    fd.append("sha256", checksums[i]);
     fd.append("part", part, "part_" + i + ".bin");
     ctx.setProgress(i / totalParts, "Uploading segment " + (i + 1) + "/" + totalParts + "…");
     await retryUpload(
