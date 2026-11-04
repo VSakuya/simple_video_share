@@ -1855,3 +1855,21 @@ button:disabled { opacity: 0.55; cursor: not-allowed; filter: none; }
   60% { background: var(--active); }
   100% { background: transparent; }
 }
+
+/* Admin Videos batch bar (36.2/36.3): the whole-library Rebuild / Repair controls
+   and the one place a running batch reports itself. The bar reuses the .progress
+   parts the upload and My-Videos tables already use. */
+.hls-batch {
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel-2);
+}
+.hls-batch__actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.hls-batch__actions .btn { width: auto; }
+.hls-batch__bar { margin-top: 10px; flex: none; }
+.hls-batch__status { margin: 8px 0 0; font-size: 0.86rem; }
+.hls-batch__notes { margin: 6px 0 0; padding-left: 18px; font-size: 0.78rem; color: var(--muted); }
+.hls-batch__notes li { margin: 2px 0; }
+.hls-batch__note { margin: 10px 0 0; font-size: 0.78rem; color: var(--muted); }

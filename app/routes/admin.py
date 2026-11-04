@@ -80,6 +80,11 @@ def _video_action_answer(ok: bool, message: str, **extra: Any) -> Any:
     """
     if _is_ajax():
         payload: dict[str, Any] = {"ok": ok, "message": message}
+        if not ok:
+            # async.js toasts ``error`` (its fallback text is the generic "Something
+            # went wrong"), so a refusal that only fills message reaches the admin as
+            # that line instead of as a reason.
+            payload["error"] = message
         payload.update(extra)
         return (jsonify(payload), 200 if ok else 400)
     flash(message, "success" if ok else "error")
@@ -174,7 +179,13 @@ def index() -> str:
 @admin_required
 def videos() -> str:
     """All videos: view, pin (§16.6) or delete."""
-    return render_template("admin_videos.html", videos=db.list_all_videos())
+    from .. import batch
+
+    return render_template(
+        "admin_videos.html",
+        videos=db.list_all_videos(),
+        hls_batch=batch.status(),
+    )
 
 
 @admin_bp.route("/users")
@@ -551,6 +562,72 @@ def delete_video_cache(video_id: int) -> Any:
         cached=False,
         stream_state=hls.STATE_NONE,
     )
+
+
+def _batch_action(mode: str) -> Any:
+    """Start one whole-library batch, or explain the refusal (36.2).
+
+    The gates are the ones _stream_action already applies to a single row - HLS off,
+    no ffmpeg on this box, repair switched off, nothing to queue - because a batch is
+    that same button run in order, not a different kind of job. batch.start hands the
+    queue to a daemon thread, so no request here waits on ffmpeg.
+    """
+    from .. import batch
+
+    started, message = batch.start(
+        Path(current_app.config["VIDEOS_DIR"]), current_app.config, mode,
+    )
+    if started and mode == "repair":
+        message += " One video at a time, on one core; the banner tracks it."
+    return _video_action_answer(started, message)
+
+
+@admin_bp.route("/videos/stream/rebuild-all", methods=["POST"])
+@admin_required
+def rebuild_all_streams() -> Any:
+    """Copy-only remux for every locally cached row without a usable stream (§36).
+
+    Cheap: about 30x realtime (31.3), and the candidate rule skips every row already
+    ready, so a rebuild-all never re-cuts a working tree. It cannot fix a sparse
+    keyframe interval - those rows land on "discarded" with a note naming Repair all.
+    """
+    return _batch_action("copy")
+
+
+@admin_bp.route("/videos/stream/repair-all", methods=["POST"])
+@admin_required
+def repair_all_streams() -> Any:
+    """GOP repair for every locally cached row that is not already repaired (§36).
+
+    The expensive button, and the one the existing library actually needs: roughly 1 s
+    of single-core per second of video (32.0), so the 14,384.8 s cached on the VPS is
+    hours of work. The queue skips rows already ready (repair), so pressing it twice
+    does not re-encode what it just finished. Drive originals and DB rows are untouched.
+    """
+    return _batch_action("repair")
+
+
+@admin_bp.route("/videos/stream/batch/stop", methods=["POST"])
+@admin_required
+def stop_stream_batch() -> Any:
+    """Stop the batch at the next video (36.0 decision 4).
+
+    The video in progress is not killed: its ffmpeg finishes, validates and lands,
+    because a cancelled encode mid-flight is how an abandoned .tmp tree happens.
+    """
+    from .. import batch
+
+    stopped, message = batch.request_stop()
+    return _video_action_answer(stopped, message)
+
+
+@admin_bp.route("/videos/stream/batch")
+@admin_required
+def stream_batch_status() -> Any:
+    """JSON progress for the banner poller (36.3). Read-only, no state change."""
+    from .. import batch
+
+    return jsonify(batch.status())
 
 
 @admin_bp.route("/export")

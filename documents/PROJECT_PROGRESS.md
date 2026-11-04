@@ -4757,3 +4757,166 @@ Refusals, all asserted by 35.4: no `google_drive_file_id`; `status` is `uploadin
   the freed-bytes number is reported at drop time instead.
 - Nothing of 35 has run on the VPS: it is dev-side code committed on top of 34, and it changes
   no behaviour until `hls_enabled` is flipped and a stream tree actually exists to drop.
+
+## 36. Batch stream builds - Rebuild all / Repair all (Session: 2026-11-04 19:20:31)
+
+Owner request in plain terms: clicking Rebuild stream one row at a time is too slow, so
+every rebuild-related control needs a Rebuild all next to it. On the VPS "one row at a
+time" is 86 cached rows - 86 confirm dialogs, 86 POSTs, 86 badges to watch, 86 chances
+to click the wrong one. A batch here is not a new kind of build: it is the same
+``hls.ensure_stream`` call made in order by one background thread, with one button that
+starts it, one banner that reports it, and one button that stops it.
+
+### 36.0 Pending Changes (2026-11-04 19:20:31)
+
+| # | File(s) | Change | Why | Blast radius |
+|---|---------|--------|-----|--------------|
+| 36.1 | `app/batch.py` (new) | one-slot sequential batch runner built on top of `hls.ensure_stream`: `status()`, `start(videos_dir, app_config, mode)`, `request_stop()`, per-mode candidate rules, a per-item 33.8 headroom pre-check, a cancel flag, and one progress dict the page renders | 32.4/33.8 established that every build must reserve its disk before ffmpeg starts; a batch that re-checks nothing per item is how 86 builds turn into 86 `failed` badges and an over-full cache. The rules belong in one module rather than in the route so a batch and a single row cannot drift apart | hls batch runner, storage headroom |
+| 36.2 | `app/routes/admin.py` | four routes - `POST /admin/videos/stream/rebuild-all`, `POST /admin/videos/stream/repair-all`, `POST /admin/videos/stream/batch/stop`, `GET /admin/videos/stream/batch` - behind one `_batch_action` gate that reuses the `_stream_action` refusals (HLS off / no ffmpeg / repair off / nothing to do); `_video_action_answer` now also echoes the refusal into `error` | the two start buttons must refuse for exactly the reasons a per-row button refuses, and async.js toasts `j.error`, so a refusal that only fills `message` reaches the admin as "Something went wrong" | admin routes, admin videos async wiring |
+| 36.3 | `app/templates/admin_videos.html`, `app/static/css/style.css` | a toolbar above the table (Rebuild all, Repair all, Stop while running) and a `#hls-batch` banner server-rendered from `batch.status()`, polled every 3 s only while a batch is running | 16.1: a mutating admin action updates the page without a reload; the banner is also where the ~1 s-per-second-of-video cost of a repair is stated before the owner commits to it | admin videos page |
+| 36.4 | `testing/probe_batch_rebuild.py` (new) | stub `hls.ensure_stream` (no ffmpeg) and assert candidate selection per mode, the skip rules, double-start refusal, the headroom skip, stop between items, the JSON routes and the rendered buttons | the candidate rules and the skip-vs-abort choice are the whole design; without a probe they are a paragraph in this document | testing |
+
+Four decisions this section is built on:
+
+1. **One slot, strictly sequential.** The VPS is 1 vCPU / 956 MiB and `hls.py` already
+   serialises repairs with `_repair_slot` (32.4). 86 parallel ffmpegs on that box is the
+   OOM story 32.0 already measured with `libsvtav1`. `start` therefore refuses while a
+   batch is running, and the worker walks the candidate list one video at a time.
+2. **Candidate rules instead of a force flag.**
+
+   | button | candidate | skipped |
+   |--------|-----------|---------|
+   | Rebuild all (copy) | has a local MP4 **and** `stream_state` is `none` / `failed` | `ready` (any source - it is already playable), `building` / `repairing` (a job owns that tree), no local copy, row deleted mid-run |
+   | Repair all (repair) | has a local MP4 **and** is not already `ready (repair)` | `building` / `repairing`, `ready (repair)`, no local copy, row deleted mid-run |
+
+   `ensure_stream` keeps its 32.3 behaviour - the per-row buttons still re-cut a tree
+   built by the other mode - and a batch deliberately does not: rebuild-all never
+   destroys a working stream, repair-all never re-encodes a video it already repaired.
+   No `force` parameter was added (deferred, 36.5).
+3. **Skip, never abort.** Each item gets the same headroom pre-check `_stream_action`
+   does (32.4 + 33.8: free space minus the reserve, against source bytes x 1.35 for a
+   repair and x 2.0 for a copy). A 1 GB file that cannot fit is recorded as skipped and
+   the batch moves on to the files that can. Aborting the whole batch would be 86
+   one-click attempts wearing a different label.
+4. **Stop means between videos.** `request_stop()` sets a flag the worker checks before
+   the next item; an ffmpeg already running finishes and its tree lands normally. A
+   killed-in-the-middle encode is how a `.tmp` tree gets abandoned.
+
+The honest number that comes with decision 2: repair is roughly 1 s of single-core per
+second of video (32.0), so for the measured VPS library (14,384.8 s cached) repair-all
+is about 4 h of one core at 0.65x realtime and about 6 h at 1.0x. `start` sums the
+durations of the candidate set and puts the estimate in both the response message and
+the banner, so the owner reads the cost before committing to it rather than after.
+
+
+### 36.1 Change Log (2026-11-04 19:40:36)
+
+- **36.1** `app/batch.py` (new, 408 lines): one process-wide batch slot (`_guard` +
+  `_state` + `_cancel`) with three public functions - `status()`,
+  `start(videos_dir, app_config, mode)` and `request_stop()` - plus `plan()` and
+  `blocker_for()`, which are the candidate rules of 36.0 decision 2 in one place so a
+  batch and a per-row button cannot disagree about who is ready. The worker thread
+  re-reads its own row and re-runs both rules per item (a viewer, an eviction or a
+  Drop cache can have changed the picture since the queue was built), then calls
+  `hls.ensure_stream` **as a module attribute**, which is what lets 36.4 test all of
+  this without ffmpeg. It owns no ffmpeg logic and touches no Drive object. The
+  summary line is the same text the banner shows and the log gets.
+- **36.2** `app/routes/admin.py`: `_batch_action(mode)` reuses the four single-row
+  refusals (HLS off / no ffmpeg / repair off / nothing to queue) and four routes -
+  `POST /admin/videos/stream/rebuild-all`, `POST /admin/videos/stream/repair-all`,
+  `POST /admin/videos/stream/batch/stop`, `GET /admin/videos/stream/batch`. `videos()`
+  now passes `hls_batch=batch.status()` so the banner renders from the same dict the
+  poller reads. `_video_action_answer` also copies a refusal into `error`, which fixes
+  a 35 gap: async.js toasts `j.error`, so every 35 refusal (and every 36 refusal)
+  reached the admin as "Something went wrong" instead of as its reason.
+- **36.3** `app/templates/admin_videos.html` + `app/static/css/style.css`: a toolbar
+  above the table (Rebuild all, Repair all, Stop batch) and a `#hls-batch` banner with
+  a `.progress` bar, the summary line and up to 12 per-item notes. The poller runs
+  every 3 s only while a batch is running, stops itself when the slot is free, and
+  toasts "refresh the page for the new Stream badges" at the end - the Stream badges
+  in the table are server-rendered and are deliberately not rewritten row by row.
+- **36.4** `testing/probe_batch_rebuild.py` (new, 314 lines): six fixture rows (a
+  plain one, ready-copy, ready-repair, mid-build, no local file, and a 40 MB one),
+  `hls.ensure_stream` replaced by a recorder that also moves the DB row, and
+  `db.list_all_videos` replaced by the fixture list so no case can queue a build on a
+  video this box really owns.
+
+### 36.2 What each button queues
+
+| button | queued | refused before the queue is even built |
+|--------|--------|----------------------------------------|
+| Rebuild all | local MP4 present and `stream_state` is `none` / `failed` | HLS off, no ffmpeg, a batch already running, nothing to queue |
+| Repair all | local MP4 present and not already `ready (repair)` - so a `ready (copy)` row is queued, a sparse-GOP row is what this exists for | the same four, plus `hls_repair_enabled = false` |
+| Stop batch | nothing: it ends the queue at the next item | "No batch is running." |
+
+Rows skipped *inside* a running queue are counted and named: `building` /
+`repairing` (a job owns that tree), `ready` (rebuild-all never re-cuts a working
+stream, repair-all never re-encodes a repaired video), no local copy, row deleted
+mid-run, and a per-item headroom refusal. A headroom refusal skips that row and
+continues - measured output from 36.4:
+
+```
+batch: copy queued 2 video(s), skipped 4, estimated about 1 s on one core
+batch: id=142 -> ready (-)
+batch: id=147 -> skipped (needs ~80 MB of headroom, this server has 20 MB: drop a cache first)
+batch: Rebuild batch finished: 2 of 2 video(s) processed - 1 ready, 1 skipped, 0 failed, 0 discarded
+```
+
+Two things the banner says out loud, because both are the cost of using this: a repair
+is roughly 1 s of single-core per second of video (32.0), so repair-all on the 14,384.8
+s cached seconds of the VPS library is ~4 h at the measured 0.65x realtime and ~6 h at
+1.0x; and a copy rebuild on the same library is ~8 min. Those numbers are what
+`estimated_seconds` / `estimate_text` in `status()` put in the response message before
+the queue starts.
+
+### 36.3 Verification (2026-11-04 19:40:36, project venv)
+
+- `python -m compileall -q app main.py wsgi.py testing` - exit 0.
+- `python -m pyright app` - 0 errors, 0 warnings, 0 informations.
+- `python testing/probe_batch_rebuild.py` - ALL BATCH PROBES PASSED: the copy plan
+  queued ids 142/147 and skipped 143/144/145/146 with the four reason strings
+  asserted verbatim; the repair plan queued 142/143/147 (a `ready (copy)` row *is* a
+  repair candidate) and skipped 144 ("already repaired"); the second `start` refused
+  ("A Repair batch is already running: 0 of 3 video(s) done"); the stop landed between
+  items (2 of 3 processed, `stopped = true`); the 40 MB row was skipped while the 1 MB
+  row was built; the discarded copy tree landed in its own bucket with the note
+  "copy-only tree discarded - needs Repair GOP"; an empty queue refused with
+  "Nothing to queue: 6 row(s) were skipped..."; every refusal JSON carried
+  `error == message`; and `/admin/videos` rendered Rebuild all, Repair all, the idle
+  (hidden) Stop batch, and the `data-batch-*` hooks.
+- `python testing/run_probes.py --timeout 90` - **21/21 probes passed** (the suite grew
+  with 36.4).
+- One honest incident on the way: the first 36.4 run crashed inside its own fixture
+  setup (`NOT NULL constraint failed: videos.stream_source` - the column is `NOT NULL
+  DEFAULT ''`, so a fixture must write `""` and not `None`) before its teardown list
+  was filled, which left row id=135 `Probe Batch A` in the dev DB pointing at a path a
+  later run deleted. `probe_home_cards.py` and `probe_no_reload.py` then failed because
+  the home page hides that row. It was removed with a one-off untracked helper
+  (`testing/_purge_batch.py`, which only matches `Probe Batch%` titles), 36.4 was
+  hardened so a fixture that fails mid-creation deletes its own row and folder, and the
+  suite re-ran green. `testing/_peek_batch.py` is the read-only version of the same check.
+
+### 36.4 Deferred from this section
+
+- **No force flag.** `ensure_stream` still re-cuts a tree built by the other mode when
+  a *per-row* button asks for it (32.3); a batch deliberately never does. If an owner
+  ever wants "re-cut everything including the good ones", that is a `force` parameter
+  on `plan`/`start` and a confirm line, not a change to these rules.
+- **A restart abandons the queue.** The batch slot is process memory: a redeploy or a
+  restart mid-run leaves the banner idle on the next page load and can leave the row
+  that was mid-ffmpeg at `building` / `repairing`. Both the batch and Drop cache treat
+  those states as "a job owns it", so such a row is then skipped by everything until it
+  is cleared. Clearing it honestly needs job ownership (pid + heartbeat or a lease),
+  not a guess from a timestamp.
+- **The banner does not rewrite the table.** Stream badges are server-rendered, so the
+  poller says "refresh the page" when a batch ends rather than patching 86 rows from
+  JSON. A per-row live badge would need the batch to report each row state and the row
+  to carry `data-video-id` - not built, not needed for the button to be useful.
+- 35.4 deferrals (byte sizes in the Cached column, no owner-side mirror on
+  `user.html`) still stand, and so does 34.4: the ~891 MB of orphan cache files on this
+  dev box belongs to no DB row, so neither `actual_cache_bytes`, the LRU evictor nor a
+  batch can see or reclaim them.
+- Nothing of 36 has run against a real video anywhere: `hls_enabled` is still absent
+  from the dev `config.json`, no `videos.stream_*` columns exist on the VPS yet, and
+  every batch in this section was executed by the 36.4 recorder.
+

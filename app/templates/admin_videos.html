@@ -6,6 +6,41 @@
   {% include "_admin_nav.html" %}
   <section class="panel">
     <h2>All videos</h2>
+    {# 36.2/36.3: whole-library stream builds. One background thread, one video at a #
+       time, and this banner is the only place the run reports itself - it polls #
+       /admin/videos/stream/batch while (and only while) a batch is running. #}
+    <div class="hls-batch" id="hls-batch" data-batch-url="{{ url_for('admin.stream_batch_status') }}"
+         data-running="{{ '1' if hls_batch.running else '0' }}">
+      <div class="hls-batch__actions">
+        <form method="post" action="{{ url_for('admin.rebuild_all_streams') }}"
+              data-async data-async-action="batch-start"
+              data-confirm="Rebuild the HLS stream of every cached video that has none? Copy-only remux, one video at a time, and rows that already have a stream are skipped. It cannot fix a long keyframe interval - that is what Repair all is for.">
+          {{ csrf_field() }}
+          <button type="submit" class="btn btn--sm">Rebuild all</button>
+        </form>
+        <form method="post" action="{{ url_for('admin.repair_all_streams') }}"
+              data-async data-async-action="batch-start"
+              data-confirm="Repair the keyframe interval of every cached video that is not already repaired? Each one is re-encoded to H.264 on a single core, roughly 1 second of CPU per second of video, so a full library is hours of work. The Google Drive originals are not touched.">
+          {{ csrf_field() }}
+          <button type="submit" class="btn btn--sm">Repair all</button>
+        </form>
+        <form method="post" action="{{ url_for('admin.stop_stream_batch') }}"
+              data-async data-batch-stop{% if not hls_batch.running %} hidden{% endif %}>
+          {{ csrf_field() }}
+          <button type="submit" class="btn btn--danger btn--sm">Stop batch</button>
+        </form>
+      </div>
+      <div class="progress hls-batch__bar" data-batch-bar{% if not hls_batch.running %} hidden{% endif %}>
+        <span class="progress__fill" data-batch-fill style="width: {% if hls_batch.total %}{{ (100 * hls_batch.done // hls_batch.total) | int }}{% else %}0{% endif %}%"></span>
+      </div>
+      <p class="hls-batch__status" data-batch-status>{{ hls_batch.message }}{% if hls_batch.running %} - {{ hls_batch.done }}/{{ hls_batch.total }} done{% if hls_batch.estimate_text %}, {{ hls_batch.estimate_text }}{% endif %}{% endif %}</p>
+      <ul class="hls-batch__notes" data-batch-notes>
+        {% for note in hls_batch.notes %}
+        <li>{{ note }}</li>
+        {% endfor %}
+      </ul>
+      <p class="hls-batch__note">Rebuild all is the cheap one (about 30x realtime). Repair all is the one that fixes the pre-30.1 library: about 1 second of single-core CPU per second of video, strictly one video at a time.</p>
+    </div>
     <div class="table-wrap">
       <table class="table">
         <thead>
@@ -129,6 +164,73 @@
       var btn = form.querySelector('button[type="submit"]');
       if (btn) btn.disabled = true;
     };
+    // Whole-library batch (36.2/36.3): the banner is the only place a running batch
+    // is visible, so it polls its own JSON status - and stops polling the moment the
+    // batch slot is free.
+    (function () {
+      var host = document.getElementById('hls-batch');
+      if (!host) return;
+      var url = host.getAttribute('data-batch-url');
+      var timer = null;
+
+      function render(state) {
+        var done = state.done || 0;
+        var total = state.total || 0;
+        var statusEl = host.querySelector('[data-batch-status]');
+        if (statusEl) {
+          var text = state.message || '';
+          if (state.running) {
+            text += ' - ' + done + '/' + total + ' done';
+            if (state.current_title) text += ' (now: ' + state.current_title + ')';
+            if (state.estimate_text) text += ', ' + state.estimate_text;
+          }
+          statusEl.textContent = text;
+        }
+        var fill = host.querySelector('[data-batch-fill]');
+        if (fill) fill.style.width = (total ? Math.round((done / total) * 100) : 0) + '%';
+        var bar = host.querySelector('[data-batch-bar]');
+        if (bar) bar.hidden = !state.running;
+        var stop = host.querySelector('[data-batch-stop]');
+        if (stop) stop.hidden = !state.running;
+        var notes = host.querySelector('[data-batch-notes]');
+        if (notes) {
+          notes.innerHTML = '';
+          (state.notes || []).forEach(function (line) {
+            var li = document.createElement('li');
+            li.textContent = line;
+            notes.appendChild(li);
+          });
+        }
+      }
+
+      function poll() {
+        fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+          .then(function (r) { return r.json(); })
+          .then(function (state) {
+            render(state);
+            if (!state.running) {
+              window.clearInterval(timer);
+              timer = null;
+              window.svsToast('Stream batch finished - refresh the page for the new Stream badges.');
+            }
+          })
+          .catch(function () { /* the next poll picks it up */ });
+      }
+
+      function start() {
+        if (timer) return;
+        poll();
+        timer = window.setInterval(poll, 3000);
+      }
+
+      if (host.getAttribute('data-running') === '1') start();
+      window.svsAsyncActions['batch-start'] = function () {
+        // The queue exists now (the route answered ok), so the banner starts polling
+        // it. A refusal never reaches this handler - async.js toasts the reason.
+        host.setAttribute('data-running', '1');
+        start();
+      };
+    })();
   </script>
 </div>
 {% endblock %}
