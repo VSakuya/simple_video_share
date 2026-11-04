@@ -295,15 +295,14 @@ def _upload_session(
     progress_cb: Optional[Any],
     resumable_uri: Optional[str],
     on_session: Optional[Any],
+    file_id: Optional[str] = None,
 ) -> Tuple[Any, int]:
     """Run one resumable upload session. Returns ``(response, resume_count)``."""
-    # Same metadata body pydrive2's own Upload() would send (Drive v2 names).
-    gfile = drive.CreateFile({
-        "title": name,
-        "mimeType": "video/mp4",
-        "parents": [{"id": folder_id}],
-    })
-    body = gfile.GetChanges()
+    if file_id is None:
+        gfile = drive.CreateFile({"title": name, "mimeType": "video/mp4", "parents": [{"id": folder_id}]})
+        body = gfile.GetChanges()
+    else:
+        body = {}  # Preserve the existing file's name, parents and permissions.
 
     response = None
     retries = 0
@@ -312,12 +311,12 @@ def _upload_session(
         media = MediaIoBaseUpload(
             fh, mimetype="video/mp4", chunksize=_UPLOAD_CHUNK_SIZE, resumable=True
         )
-        request = service.files().insert(
-            body=body,
-            media_body=media,
-            supportsAllDrives=True,
-            fields="id",
-        )
+        if file_id is None:
+            request = service.files().insert(body=body, media_body=media, supportsAllDrives=True, fields="id")
+        else:
+            request = service.files().update(fileId=file_id, body=body, media_body=media,
+                                             supportsAllDrives=True, newRevision=True,
+                                             fields="id,fileSize,md5Checksum")
         if resumable_uri is not None:
             # Resume a session started by a previous process run: skip the
             # session-start POST and force the server progress query so
@@ -357,6 +356,44 @@ def _upload_session(
                     raise
                 time.sleep(_UPLOAD_RETRY_BACKOFF_SECONDS * retries)
     return response, retries
+
+
+def replace_video_file(local_path: str, file_id: str, progress_cb=None,
+                       resumable_uri=None, on_session=None) -> None:
+    """Replace media in place; verify the committed bytes before reporting success."""
+    import hashlib
+    global _quota_cache
+    size = os.path.getsize(local_path)
+    with open(local_path, "rb") as fh:
+        checksum = hashlib.file_digest(fh, "md5").hexdigest()
+    service, http = _service_and_http()
+    http.timeout = _UPLOAD_REQUEST_TIMEOUT
+    fields = "id,fileSize,md5Checksum"
+    def matches(item):
+        return (str(item.get("id")) == file_id and int(item.get("fileSize", -1)) == size
+                and item.get("md5Checksum") == checksum)
+    # Handles a lost final response/restart after Drive already committed the update.
+    existing = service.files().get(fileId=file_id, supportsAllDrives=True, fields=fields).execute(http=http)
+    if not matches(existing):
+        session = resumable_uri
+        while True:
+            try:
+                result, _ = _upload_session(service, http, None, "", "", local_path, size,
+                                            progress_cb, session, on_session, file_id=file_id)
+                if not matches(result):
+                    raise RuntimeError("Drive replacement checksum/size verification failed")
+                break
+            except HttpError as exc:
+                if session and exc.resp.status in (404, 410):
+                    session = None
+                    if on_session:
+                        on_session(None)
+                    continue
+                raise
+    if progress_cb:
+        progress_cb(size, size)
+    _exists_cache.pop(file_id, None)
+    _quota_cache = None
 
 
 def download_file(file_id: str, dest_path: str, progress_cb=None) -> str:

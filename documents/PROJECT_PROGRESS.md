@@ -5269,3 +5269,24 @@ no. Same guard proof: `admin.py` back on `bool(row.get("local_filename"))` fails
 - Validation: all 14 isolated regression tests pass, including batch exclusion,
   healthy versus sparse-GOP streams, missing files and direct-request rejection;
   pyright and rendered JavaScript syntax checks pass.
+
+### 2026-11-05 — Repair becomes the durable Drive version
+
+- Repair now updates the media of the existing Drive object via resumable
+  files.update (same file ID, name, parents and permissions; new revision). The
+  committed file size and MD5 must match before local publication is finalized.
+- Retain the repaired MP4 and validated staged HLS tree in a durable journal
+  through upload errors/restarts. Resume uploads without re-encoding; a matching
+  Drive checksum handles a lost final upload response without another update.
+- Replace the local source and update size/codec/bitrate after Drive verification.
+  Only then publish the new HLS generation and apply keep_source cleanup. Pending
+  repair files are protected from automatic eviction and admin cache deletion.
+- Existing pre-upgrade repaired HLS trees expose Sync repair to Drive, including
+  segments-only caches. Rewrap these streams with codec copy instead of encoding
+  again. Single-video requests and Repair all both support this migration.
+- Admin progress includes the Drive sync stage and only reaches 100% after it
+  succeeds. Updated operation confirmations to describe replacement explicitly.
+- Validation: 21 isolated tests pass (real FFmpeg encoding/remux, simulated Drive
+  update/MD5 mismatch/expired session/lost response, retry without encoding,
+  legacy migration and eviction/recache); pyright and JavaScript checks pass.
+  Drive API calls were mocked; no live Drive files were overwritten by testing.

@@ -1,6 +1,7 @@
 """HLS segmentation for locally cached videos (§31, §32).
 
-The immutable source of truth is the single MP4 stored in Google Drive. Every byte
+The source of truth is the single MP4 stored in Google Drive. GOP repair updates
+that same Drive object after validating the re-encoded MP4 and its HLS tree. Every byte
 this module writes under ``storage/videos/`` is a **derived, regenerable cache**:
 
     storage/videos/<hash>/stream/master.m3u8    media playlist (EXT-X-MAP -> init.mp4)
@@ -29,8 +30,8 @@ Invariants this module is responsible for:
   worker thread or an admin action - never from a request handler.
 - A stream is built under ``<stream>.tmp/`` and renamed only after validation, so
   a half-built tree is never reported as ``ready``.
-- The Drive object and the DB row are never modified here. Dropping the local MP4
-  requires a Drive copy to exist.
+- Copy-only builds leave Drive unchanged. Repair replaces its media in place;
+  local repaired bytes are retained until Drive confirms their checksum and size.
 """
 
 from __future__ import annotations
@@ -50,7 +51,7 @@ import threading
 from pathlib import Path
 from typing import Any, Iterator, Optional
 
-from . import db
+from . import db, repair_sync
 
 logger = logging.getLogger("simple_video_share.hls")
 
@@ -375,12 +376,11 @@ def _run_ffmpeg(
     job = getattr(_job_context, "job", None)
     if job:
         base, video_id, duration, mode = job
-        output = _job_path(base, video_id).with_suffix(".progress")
-        output.unlink(missing_ok=True)
+        output = _job_path(base, video_id).with_name(f"{video_id}.{uuid.uuid4().hex}.progress")
         encoding = "repair encode" in why
-        offset, weight = (0, 95) if encoding else ((95, 4) if mode == MODE_REPAIR else (0, 99))
+        offset, weight = (0, 90) if encoding else ((90, 5) if mode == MODE_REPAIR else (0, 99))
         _write_job(base, video_id, running=True, stage="encoding" if encoding else "segmenting",
-                   duration=duration, offset=offset, weight=weight)
+                   duration=duration, offset=offset, weight=weight, progress_file=output.name)
         # Insert before the final output; works with the optional nice prefix.
         argv = argv[:-1] + ["-progress", str(output.resolve()), "-nostats", argv[-1]]
     logger.info("hls: %s: %s", why, " ".join(argv))
@@ -478,9 +478,12 @@ def _write_job(base: Path, video_id: int, **values: Any) -> None:
 def progress(base: Path, video_id: int) -> dict[str, Any]:
     try:
         job = json.loads(_job_path(base, video_id).read_text(encoding="utf-8"))
-        if job.get("running"):
+        if job.get("running") and job.get("stage") != "syncing_drive":
             seconds = 0.0
-            output = _job_path(base, video_id).with_suffix(".progress")
+            progress_name = job.get("progress_file", f"{video_id}.progress")
+            if Path(progress_name).name != progress_name:
+                raise ValueError("Invalid progress path")
+            output = _job_path(base, video_id).parent / progress_name
             if output.exists():
                 for line in output.read_text(encoding="utf-8", errors="replace").splitlines():
                     if line.startswith("out_time_us="):
@@ -514,7 +517,7 @@ def recover_jobs(base: Path) -> None:
                 tree = stream_dir_for(base, video)
                 ready = tree is not None and validate_stream(tree, video.get("duration"))[0]
                 db.update_video(video_id, stream_state=STATE_READY if ready else STATE_FAILED)
-                if tree:
+                if tree and not repair_sync.pending(base, video_id):
                     _rmtree_quiet(tree.parent / (tree.name + TMP_SUFFIX))
                     root = tree.name.split(".gen-")[0]
                     for abandoned in tree.parent.glob(root + ".gen-*.tmp"):
@@ -544,7 +547,20 @@ def ensure_stream(videos_dir, video, app_config, *, mode=MODE_COPY, reason="") -
             try:
                 _write_job(base, video_id, running=True, stage="preparing", percent=0,
                            duration=video.get("duration"), offset=0, weight=0)
-                result = _ensure_stream(base, video, app_config, mode=mode, reason=reason)
+                try:
+                    if repair_sync.pending(base, video_id):
+                        result = repair_sync.finish(base, video_id, app_config)
+                    elif mode == MODE_REPAIR and repair_sync.needs_sync(base, video):
+                        repair_sync.prepare_legacy(base, video, app_config)
+                        result = repair_sync.finish(base, video_id, app_config)
+                    else:
+                        result = _ensure_stream(base, video, app_config, mode=mode, reason=reason)
+                except Exception as exc:
+                    _job_context.error = str(exc)
+                    current = db.get_video_by_id(video_id) or video
+                    tree = stream_dir_for(base, current)
+                    result = STATE_READY if tree and validate_stream(tree, current.get("duration"))[0] else STATE_FAILED
+                    db.update_video(video_id, stream_state=result)
                 failed = getattr(_job_context, "error", None)
                 _write_job(base, video_id, running=False, stage="failed" if failed or result == STATE_FAILED else "complete",
                            percent=None if failed or result == STATE_FAILED else 100, state=result, error=failed)
@@ -552,6 +568,11 @@ def ensure_stream(videos_dir, video, app_config, *, mode=MODE_COPY, reason="") -
             finally:
                 _job_context.job = None
                 _job_context.error = None
+                for output in (base / ".hls-jobs").glob(f"{video_id}.*.progress"):
+                    try:
+                        output.unlink(missing_ok=True)
+                    except OSError:
+                        pass
     except LockBusy:
         return str(video.get("stream_state") or STATE_NONE)
 
@@ -604,6 +625,8 @@ def _ensure_stream(
             "hls: id=%s rebuilding a %s stream as %s", video_id, built, mode
         )
 
+    if mode == MODE_REPAIR and (not video.get("google_drive_file_id") or video.get("status") != "ready"):
+        raise StreamError("Repair requires a completed Drive mirror first.")
     source = source_path_for(base, video)
     if source is None:
         logger.info("hls: id=%s has no local MP4 to segment", video_id)
@@ -659,6 +682,9 @@ def _ensure_stream(
                 f"repair encode id={video_id} ({reason})",
                 tmp_dir,
             )
+            if not storage.ensure_space(str(base.parent), repaired.stat().st_size, app_config,
+                                        peak_factor=1.05, protect=[video_id]):
+                raise StreamError("Not enough space for repaired HLS segments; original preserved.")
             _run_ffmpeg(
                 _copy_argv(ffmpeg, repaired, playlist, cfg),
                 cfg["timeout_seconds"],
@@ -703,17 +729,8 @@ def _ensure_stream(
             return STATE_NONE
 
         if mode == MODE_REPAIR:
-            # 32.1 step 3: repaired.mp4 is scaffolding. Keeping it would leave the
-            # cache holding the segments AND a re-encode at 63 % of the source -
-            # worse than the MP4 this whole path exists to replace.
-            scaffold = tmp_dir / REPAIRED_NAME
-            try:
-                if scaffold.is_file():
-                    scaffold.unlink()
-            except OSError as exc:  # noqa: BLE001 - the stream itself is valid
-                logger.warning(
-                    "hls: id=%s could not delete %s: %s", video_id, scaffold, exc
-                )
+            repair_sync.prepare(base, video, source, tmp_dir, publish_dir)
+            return repair_sync.finish(base, video_id, app_config)
 
         tmp_dir.rename(publish_dir)
         stream_dir = publish_dir
@@ -729,24 +746,6 @@ def _ensure_stream(
             video_id, mode, len(playlist_segment_names(stream_dir)), longest,
             stream_bytes_length(stream_dir), reason or "-",
         )
-        if mode == MODE_REPAIR:
-            # A repair is a re-encode, so its size follows hls_repair_crf rather
-            # than the source size. Measured on the VPS: 63 % of the source at
-            # crf 26. If a particular file comes out bigger than the MP4 it is
-            # about to replace, say so in the log while the source is still there.
-            built_bytes = stream_bytes_length(stream_dir)
-            try:
-                source_bytes = source.stat().st_size
-            except OSError:
-                source_bytes = 0
-            if source_bytes and built_bytes > source_bytes * 1.2:
-                logger.warning(
-                    "hls: id=%s repaired segments are %d%% of the source it replaces "
-                    "(%d vs %d bytes); a higher hls_repair_crf would make them smaller",
-                    video_id, int(built_bytes * 100.0 / source_bytes),
-                    built_bytes, source_bytes,
-                )
-
         if cfg["keep_source"]:
             return STATE_READY
         _drop_local_source(base, db.get_video_by_id(video_id) or video, cfg, reason)
@@ -754,7 +753,8 @@ def _ensure_stream(
     except Exception as exc:
         logger.error("hls: id=%s build failed: %s", video_id, exc)
         _job_context.error = str(exc)
-        _rmtree_quiet(tmp_dir)
+        if not repair_sync.pending(base, video_id):
+            _rmtree_quiet(tmp_dir)
         current = db.get_video_by_id(video_id) or video
         current_dir = stream_dir_for(base, current)
         usable = current_dir is not None and validate_stream(current_dir, current.get("duration"))[0]
@@ -817,6 +817,18 @@ def stream_actions(videos_dir: Path | str, video: dict[str, Any], app_config: An
         label = "Build failed"
     else:
         label = "Not built"
+    if repair_sync.pending(Path(videos_dir), int(video["id"])):
+        return {"label": "Repair · Drive sync pending" if not busy else "Repair · syncing Drive",
+                "rebuild_blocker": "Finish syncing the repaired file to Drive first.",
+                "repair_blocker": "A repair is running." if busy else None,
+                "can_rebuild": False, "can_repair": not busy, "repair_label": "Retry Drive sync"}
+    if repaired and not repair_sync.mirrored(Path(videos_dir), video):
+        available = (not busy and bool(video.get("google_drive_file_id")) and video.get("status") == "ready"
+                     and (app_config is None or can_build(app_config, MODE_REPAIR)))
+        return {"label": "Repaired · Drive sync needed", "can_rebuild": False, "can_repair": available,
+                "rebuild_blocker": "The repaired stream is already built.",
+                "repair_blocker": None if available else "Repair sync is unavailable or already running.",
+                "repair_label": "Sync repair to Drive"}
     common = "A stream job is already running." if busy else None
     if not common and source_path_for(videos_dir, video) is None:
         common = "No local source; download it from Drive first."
@@ -825,13 +837,15 @@ def stream_actions(videos_dir: Path | str, video: dict[str, Any], app_config: An
               "The stream already has suitable keyframe intervals." if valid and not needs_repair else common)
     if busy:
         rebuild = repair = common
+    if not video.get("google_drive_file_id") or video.get("status") != "ready":
+        repair = "Wait for the original Drive upload to finish before repairing."
     if app_config is not None:
         if not can_build(app_config, MODE_COPY):
             rebuild = rebuild or "Stream builds are unavailable."
         if not can_build(app_config, MODE_REPAIR):
             repair = repair or "Stream repair is unavailable."
     return {"label": label, "rebuild_blocker": rebuild, "repair_blocker": repair,
-            "can_rebuild": rebuild is None, "can_repair": repair is None}
+            "can_rebuild": rebuild is None, "can_repair": repair is None, "repair_label": "Repair GOP"}
 
 
 def mark_stale(video_id: int, reason: str) -> None:

@@ -45,6 +45,7 @@ class SegmentsTest(unittest.TestCase):
         for item in [patch.object(upload, 'SEGMENT_SIZE', 4),
                      patch.object(upload, '_check_space', return_value=(True, '')),
                      patch.object(upload.drive_worker.worker, 'enqueue'),
+                     patch('app.drive.replace_video_file'),
                      patch.object(storage, 'enforce_cache_limit')]:
             item.start()
             self.addCleanup(item.stop)
@@ -203,7 +204,7 @@ class SegmentsTest(unittest.TestCase):
         def playlist(seconds):
             (tree / 'master.m3u8').write_text(f'#EXTM3U\n#EXT-X-MAP:URI="init.mp4"\n#EXTINF:{seconds},\nseg-000.m4s\n#EXT-X-ENDLIST\n')
         playlist(2)
-        vid = db.create_video('eligibility', self.uid, None, 'eligibility/source.mp4', None, 6, duration=2)
+        vid = db.create_video('eligibility', self.uid, None, 'eligibility/source.mp4', None, 6, duration=2, google_drive_file_id='fixture-drive')
         db.update_video(vid, stream_state='ready', stream_source='copy', stream_dir='eligibility/stream')
         video = db.get_video_by_id(vid)
         cfg = self.app.config
@@ -227,6 +228,9 @@ class SegmentsTest(unittest.TestCase):
             self.assertEqual(actions['label'], 'Rebuilt · needs repair')
             self.assertEqual(len(batch.plan(self.base, 'repair', [video], app_config=cfg)['candidates']), 1)
             video['stream_source'] = 'repair'
+            from app import repair_sync
+            self.assertTrue(hls.stream_actions(self.base, video, cfg)['can_repair'])
+            repair_sync._receipt(self.base, vid, {'drive_id':'fixture-drive', 'md5':'fixture', 'size':6})
             self.assertFalse(hls.stream_actions(self.base, video, cfg)['can_repair'])
             self.assertEqual(hls.stream_actions(self.base, video, cfg)['label'], 'Ready · repaired')
             (tree / 'seg-000.m4s').unlink()
@@ -243,7 +247,7 @@ class SegmentsTest(unittest.TestCase):
         path.parent.mkdir()
         subprocess.run([ffmpeg, '-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc=duration=4:size=160x120:rate=24',
                         '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-g', '48', '-threads', '1', str(path)], check=True, capture_output=True)
-        vid = db.create_video('fixture', self.uid, None, 'fixture/source.mp4', None, path.stat().st_size, duration=4, fps=24)
+        vid = db.create_video('fixture', self.uid, None, 'fixture/source.mp4', None, path.stat().st_size, duration=4, fps=24, google_drive_file_id='fixture-drive')
         return vid
 
     def test_real_ffmpeg_progress_and_versioned_playback(self):
@@ -273,6 +277,106 @@ class SegmentsTest(unittest.TestCase):
         progress = self.client.get('/admin/videos/stream/progress')
         self.assertEqual(progress.status_code, 200)
         self.assertEqual(progress.json['jobs'][0]['percent'], 100)
+
+    def test_repair_sync_failure_preserves_payload_and_retries_without_encoding(self):
+        from app import repair_sync, drive
+        vid = self.make_video()
+        original = db.get_video_by_id(vid)
+        source = self.base / original['local_filename']
+        old_bytes = source.read_bytes()
+        with patch.object(storage, 'ensure_space', return_value=True), patch.object(drive, 'replace_video_file', side_effect=OSError('offline')):
+            result = hls.ensure_stream(self.base, original, self.app.config, mode='repair')
+        self.assertEqual(result, hls.STATE_FAILED)
+        self.assertTrue(repair_sync.pending(self.base, vid))
+        self.assertEqual(source.read_bytes(), old_bytes)
+        self.assertEqual(hls.progress(self.base, vid)['stage'], 'failed')
+        actions = hls.stream_actions(self.base, db.get_video_by_id(vid), self.app.config)
+        self.assertTrue(actions['can_repair'])
+        self.assertFalse(actions['can_rebuild'])
+        self.assertIsNotNone(storage.cache_drop_blocker(db.get_video_by_id(vid), self.base))
+        # Startup recovery must preserve the journal's staged MP4 and HLS tree.
+        db.update_video(vid, stream_state='repairing')
+        hls.recover_jobs(self.base)
+        import json
+        journal = json.loads(repair_sync.journal_path(self.base, vid).read_text())
+        self.assertTrue((self.base / journal['temp'] / hls.REPAIRED_NAME).is_file())
+        with patch.object(hls, '_run_ffmpeg') as encode, patch.object(drive, 'replace_video_file') as replace:
+            result = hls.ensure_stream(self.base, db.get_video_by_id(vid), self.app.config, mode='repair')
+            encode.assert_not_called()
+            self.assertEqual(replace.call_args.args[1], 'fixture-drive')
+        self.assertEqual(result, hls.STATE_READY)
+        self.assertFalse(repair_sync.pending(self.base, vid))
+        repaired = db.get_video_by_id(vid)
+        self.assertEqual(repaired['google_drive_file_id'], 'fixture-drive')
+        self.assertEqual(repaired['size_bytes'], source.stat().st_size)
+        self.assertEqual(repaired['codec'], 'h264')
+        self.assertNotEqual(source.read_bytes(), old_bytes)
+        self.assertEqual(hls.progress(self.base, vid)['percent'], 100)
+
+    def test_legacy_repaired_segments_only_sync_without_reencoding(self):
+        from app import repair_sync, drive
+        import json
+        vid = self.make_video()
+        with patch.object(storage, 'ensure_space', return_value=True):
+            self.assertEqual(hls.ensure_stream(self.base, db.get_video_by_id(vid), self.app.config, mode='repair'), 'ready')
+        # Simulate a pre-upgrade repair: segments exist, local MP4 removed,
+        # and no receipt proving the Drive object contains the repaired version.
+        (self.base / '.hls-jobs' / f'{vid}.mirrored.json').unlink()
+        row = db.get_video_by_id(vid)
+        (self.base / row['local_filename']).unlink()
+        db.update_video(vid, local_filename=None)
+        from app import batch
+        row = db.get_video_by_id(vid)
+        self.assertEqual(len(batch.plan(self.base, 'repair', [row], app_config=self.app.config)['candidates']), 1)
+        with patch.object(hls, 'start_build', return_value=True) as start:
+            response = self.client.post(f'/admin/videos/{vid}/stream/repair', headers={'X-Requested-With':'XMLHttpRequest'})
+            self.assertEqual(response.status_code, 200, response.json)
+            start.assert_called_once()
+        with patch.object(hls, 'ensure_stream', return_value='ready') as ensure, patch.object(batch, '_headroom_blocker') as headroom:
+            batch._run(self.base, self.app.config, 'repair', [vid])
+            ensure.assert_called_once()
+            headroom.assert_not_called()
+        calls = []
+        run = hls._run_ffmpeg
+        def capture(argv, *args):
+            calls.append(argv)
+            return run(argv, *args)
+        with patch.object(storage, 'ensure_space', return_value=True), patch.object(hls, '_run_ffmpeg', side_effect=capture), patch.object(drive, 'replace_video_file') as replace:
+            result = hls.ensure_stream(self.base, db.get_video_by_id(vid), self.app.config, mode='repair')
+        self.assertEqual(result, 'ready')
+        self.assertTrue(calls)
+        self.assertFalse(any('libx264' in argv for argv in calls))
+        self.assertEqual(replace.call_args.args[1], 'fixture-drive')
+        self.assertTrue(repair_sync.mirrored(self.base, db.get_video_by_id(vid)))
+        self.assertFalse(hls.stream_actions(self.base, db.get_video_by_id(vid), self.app.config)['can_repair'])
+
+    def test_recache_uses_repaired_drive_bytes_and_only_remuxes(self):
+        from app import drive
+        vid = self.make_video()
+        row = db.get_video_by_id(vid)
+        remote = []
+        def replace(path, *args, **kwargs):
+            remote.append(Path(path).read_bytes())
+        self.app.config['HLS']['keep_source'] = False
+        with patch.object(storage, 'ensure_space', return_value=True), patch.object(drive, 'replace_video_file', side_effect=replace):
+            self.assertEqual(hls.ensure_stream(self.base, row, self.app.config, mode='repair'), 'ready')
+        row = db.get_video_by_id(vid)
+        self.assertIsNone(row['local_filename'])
+        storage.drop_local_cache(str(self.base.parent), row)
+        downloaded = self.base / 'fixture' / 'cached.mp4'
+        downloaded.parent.mkdir(exist_ok=True)
+        downloaded.write_bytes(remote[0])
+        db.update_video(vid, local_filename='fixture/cached.mp4')
+        commands = []
+        run = hls._run_ffmpeg
+        def capture(argv, *args):
+            commands.append(argv)
+            return run(argv, *args)
+        with patch.object(storage, 'ensure_space', return_value=True), patch.object(hls, '_run_ffmpeg', side_effect=capture):
+            self.assertEqual(hls.ensure_stream(self.base, db.get_video_by_id(vid), self.app.config), 'ready')
+        self.assertTrue(commands)
+        self.assertFalse(any('libx264' in command for command in commands))
+        self.assertFalse(hls.stream_actions(self.base, db.get_video_by_id(vid), self.app.config)['can_repair'])
 
     def test_failed_rebuild_preserves_tree_and_restart_recovers(self):
         vid = self.make_video()

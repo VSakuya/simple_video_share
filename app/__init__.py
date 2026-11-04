@@ -135,6 +135,8 @@ def create_app() -> Flask:
     from .routes.upload import cleanup_segments
     cleanup_segments(videos_dir)
     drive_worker.worker.resume_incomplete(videos_dir, app.config)
+    from . import repair_sync
+    repair_sync.resume_pending(videos_dir, app.config)
     try:
         storage.enforce_cache_limit(
             videos_dir, str(videos_dir.parent), app.config,

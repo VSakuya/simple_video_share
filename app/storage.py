@@ -172,6 +172,9 @@ def _next_evict_candidate(
             continue
         if video["id"] in protected_set:
             continue
+        from . import repair_sync
+        if repair_sync.pending(Path(base_dir) / "videos", int(video["id"])):
+            continue
         if video.get("stream_state") in ("building", "repairing"):
             continue
         if video.get("status") == "uploading":
@@ -260,13 +263,16 @@ def cache_footprint(base_dir: str, video: dict) -> int:
     )
 
 
-def cache_drop_blocker(video: dict) -> Optional[str]:
+def cache_drop_blocker(video: dict, videos_dir: Optional[Path] = None) -> Optional[str]:
     """Reason this cache entry must not be dropped, or None when it may be.
 
     The rule every cache removal already follows, stated once so a button cannot
     invent a looser one: a local copy may only be thrown away when Google Drive
     holds the original, and never while that upload is still in progress.
     """
+    from . import repair_sync
+    if videos_dir is not None and repair_sync.pending(videos_dir, int(video["id"])):
+        return "The repaired MP4 is waiting to sync to Drive; retry repair first."
     if not video.get("google_drive_file_id"):
         return (
             "No Google Drive copy of this video, so its local file is the only "

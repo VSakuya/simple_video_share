@@ -548,6 +548,10 @@ def _stream_action(video_id: int, mode: str) -> Any:
     if mode == hls.MODE_REPAIR and not cfg["repair_enabled"]:
         flash("GOP repair is off (hls_repair_enabled = false in config.json).", "error")
         return redirect(url_for("admin.videos"))
+    from .. import repair_sync
+    if mode == hls.MODE_REPAIR and repair_sync.needs_sync(videos_dir, video):
+        started = hls.start_build(videos_dir, video, current_app.config, mode=mode, reason="admin Drive sync")
+        return _video_action_answer(started, "Repair sync to Drive started." if started else "Could not start repair sync.", video_id=video_id)
     source = hls.source_path_for(videos_dir, video)
     if source is None:
         # A stream is derived from the MP4, so a cache-evicted video has to be
@@ -619,9 +623,8 @@ def repair_stream(video_id: int) -> Any:
     interval, then segment that copy-only.
 
     Admin-triggered only (32.2) - it costs roughly 1 s of single-core CPU per second
-    of video. The Google Drive original and every DB field (title, tags, cover,
-    comments, folder) stay untouched, which is exactly what makes this the
-    no-re-upload path for the existing library.
+    of video. The repaired MP4 replaces the media of the existing Drive file;
+    its identity and the video's title, tags, cover, comments and folder stay intact.
     """
     return _stream_action(video_id, "repair")
 
@@ -667,7 +670,7 @@ def delete_video_cache(video_id: int) -> Any:
             video_id=video_id,
             stream_state=state,
         )
-    blocker = storage.cache_drop_blocker(video)
+    blocker = storage.cache_drop_blocker(video, Path(current_app.config["VIDEOS_DIR"]))
     if blocker:
         return _video_action_answer(False, blocker, video_id=video_id)
     base_dir = str(Path(current_app.config["VIDEOS_DIR"]).parent)
@@ -730,7 +733,7 @@ def repair_all_streams() -> Any:
     The expensive button, and the one the existing library actually needs: roughly 1 s
     of single-core per second of video (32.0), so the 14,384.8 s cached on the VPS is
     hours of work. The queue skips rows already ready (repair), so pressing it twice
-    does not re-encode what it just finished. Drive originals and DB rows are untouched.
+    does not re-encode what it just finished. Repaired media updates the existing Drive files without changing video identities.
     """
     return _batch_action("repair")
 

@@ -20,7 +20,7 @@
         </form>
         <form method="post" action="{{ url_for('admin.repair_all_streams') }}"
               data-async data-async-action="batch-start"
-              data-confirm="Repair the keyframe interval of every cached video that needs keyframe repair? Each one is re-encoded to H.264 on a single core, roughly 1 second of CPU per second of video, so a full library is hours of work. The Google Drive originals are not touched.">
+              data-confirm="Repair the keyframe interval of every cached video that needs keyframe repair? Each one is re-encoded to H.264 on a single core, roughly 1 second of CPU per second of video, so a full library is hours of work. Each repaired MP4 replaces its existing Google Drive file.">
           {{ csrf_field() }}
           <button type="submit" class="btn btn--sm">Repair all</button>
         </form>
@@ -105,9 +105,9 @@
                 <button type="submit" class="btn btn--sm"{% if not video['stream_actions']['can_rebuild'] %} disabled{% endif %}>Rebuild stream</button>
               </form>
               <form data-stream-action="repair"{% if not video['stream_actions']['can_repair'] %} hidden{% endif %} method="post" action="{{ url_for('admin.repair_stream', video_id=video['id']) }}"
-                    data-confirm="Repair this video's keyframe interval? The server re-encodes it to H.264 on one core (roughly 1 s per second of video). The Google Drive original is not touched.">
+                    data-confirm="{% if video['stream_actions']['repair_label'] == 'Repair GOP' %}Repair this video's keyframe interval? The server re-encodes it to H.264, then replaces the existing Google Drive file with the repaired MP4.{% else %}Sync the existing repaired video to Google Drive? This replaces the existing Drive file without re-encoding the video.{% endif %}">
               {{ csrf_field() }}
-                <button type="submit" class="btn btn--sm"{% if not video['stream_actions']['can_repair'] %} disabled{% endif %}>Repair GOP</button>
+                <button type="submit" class="btn btn--sm"{% if not video['stream_actions']['can_repair'] %} disabled{% endif %}>{{ video['stream_actions']['repair_label'] }}</button>
               </form>
               <form method="post" action="{{ url_for('admin.delete_video_cache', video_id=video['id']) }}"
                     data-async data-async-action="drop-cache"
@@ -133,7 +133,7 @@
   <script>
     (function () {
       var url = {{ url_for('admin.stream_progress') | tojson }};
-      var stages = {queued:'Queued', preparing:'Preparing', encoding:'Repairing video', segmenting:'Building segments', complete:'Completed', failed:'Failed', interrupted:'Interrupted'};
+      var stages = {queued:'Queued', preparing:'Preparing', encoding:'Repairing video', segmenting:'Building segments', syncing_drive:'Syncing repaired video to Drive', complete:'Completed', failed:'Failed', interrupted:'Interrupted'};
       async function pollRepairs() {
         try {
           if (document.hidden) return;
@@ -148,6 +148,12 @@
               var form = row.querySelector('[data-stream-action="' + action + '"]');
               form.hidden = !job.actions['can_' + action];
               form.querySelector('button').disabled = form.hidden;
+              if (action === 'repair') {
+                form.querySelector('button').textContent = job.actions.repair_label;
+                form.setAttribute('data-confirm', job.actions.repair_label === 'Repair GOP' ?
+                  'Repair this video and replace the existing Google Drive file with the repaired MP4?' :
+                  'Sync the existing repaired video to Google Drive? This replaces the existing Drive file without re-encoding.');
+              }
             });
             var box = row.querySelector('[data-repair-progress]');
             box.hidden = job.stage === 'idle';

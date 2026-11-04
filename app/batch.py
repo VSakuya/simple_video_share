@@ -292,21 +292,23 @@ def _run(videos_dir: Path, app_config: Any, mode: str, video_ids: list[int]) -> 
         if blocker is not None:
             _record(video_id, "skipped", blocker)
             continue
-        source = hls.source_path_for(videos_dir, video)
-        if source is None:
-            # Raced with an eviction between blocker_for and this stat.
-            _record(video_id, "skipped", "no local copy on this server")
-            continue
-        try:
-            source_bytes = source.stat().st_size
-        except OSError:
-            source_bytes = 0
-        headroom = _headroom_blocker(videos_dir, source_bytes, mode, app_config)
-        if headroom is not None:
-            _record(video_id, "skipped", headroom)
-            logger.warning("batch: id=%s skipped: %s", video_id, headroom)
-            continue
-
+        from . import repair_sync
+        sync_only = mode == hls.MODE_REPAIR and repair_sync.needs_sync(videos_dir, video)
+        if not sync_only:
+            source = hls.source_path_for(videos_dir, video)
+            if source is None:
+                # Raced with an eviction between blocker_for and this stat.
+                _record(video_id, "skipped", "no local copy on this server")
+                continue
+            try:
+                source_bytes = source.stat().st_size
+            except OSError:
+                source_bytes = 0
+            headroom = _headroom_blocker(videos_dir, source_bytes, mode, app_config)
+            if headroom is not None:
+                _record(video_id, "skipped", headroom)
+                logger.warning("batch: id=%s skipped: %s", video_id, headroom)
+                continue
         _current(video_id, str(video.get("title") or ""))
         try:
             state = hls.ensure_stream(
