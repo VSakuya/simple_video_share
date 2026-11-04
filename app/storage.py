@@ -100,7 +100,11 @@ def actual_cache_bytes(videos_dir) -> int:
 
 
 def ensure_space(
-    base_dir: str, incoming_bytes: int, app_config: dict, peak_factor: float | None = None
+    base_dir: str,
+    incoming_bytes: int,
+    app_config: dict,
+    peak_factor: float | None = None,
+    protect: Iterable[int] | None = None,
 ) -> bool:
     """Ensure ``incoming_bytes`` can be stored while keeping the reserve free.
 
@@ -114,12 +118,16 @@ def ensure_space(
     dropped, so a 1.0 reservation lets a large upload pass the pre-check and then
     die halfway through segmentation. A caller with a different peak (a repair,
     where the source is already on disk) passes its own factor.
+
+    ``protect`` names the videos the caller is about to write. Without it a reservation
+    can evict the very file the caller needs: an HLS build asks for room for the
+    segments of a video that is itself a cached, Drive-backed LRU candidate.
     """
     reserve = min_free_space_bytes(app_config)
     factor = peak_factor if peak_factor is not None else _peak_factor(app_config)
     needed = int(incoming_bytes * max(1.0, float(factor)))
     while free_space_bytes(base_dir) < reserve + needed:
-        candidate = _next_evict_candidate(base_dir, app_config)
+        candidate = _next_evict_candidate(base_dir, app_config, protect)
         if candidate is None:
             break
         _evict(candidate, base_dir, app_config)

@@ -4566,3 +4566,114 @@ vendored), `app/db.py`, `app/storage.py`, `app/drive_worker.py`, `app/__init__.p
 `app/templates/watch.html`, `app/templates/together_view.html`, `app/templates/admin_videos.html`,
 `app/templates/admin_settings.html`, `testing/probe_hls_flow.py`, `testing/probe_hls_repair.py`,
 `testing/probe_cache_dirs.py` (untracked by `.gitignore`, like every other probe).
+
+## 34. Segmentation trigger points, and the self-eviction defect they exposed (Session: 2026-11-04 17:53:01)
+
+Owner question answered here: at which points does an already-cached video get split into segments?
+Answering it meant reading every call site, and the reading found one real defect in the disk-reservation
+code shipped by 33. It is fixed in this section.
+
+### 34.0 Pending Changes found while answering
+
+| # | File(s) | Change | Why | Blast radius |
+|---|---------|--------|-----|--------------|
+| 34.1 | `app/storage.py ensure_space` + `_next_evict_candidate`, `app/hls.py ensure_stream`, `app/routes/watch.py start_cache` | new `protect` argument: a disk reservation may not evict the videos it names | an HLS build asks `ensure_space` for room for the segments of a video that is itself a cached, Drive-backed LRU candidate, so the reservation could delete the exact MP4 it was about to segment. `start_cache` protects the row it is downloading for the same reason | cache eviction + every HLS build |
+| 34.2 | `app/hls.py ensure_stream` | the reservation moved out of the repair-only branch so **every** build reserves before ffmpeg starts: 1.35x the source for a repair, 2.0x for a copy | a copy build briefly holds the MP4 **and** a near-complete duplicate of it as segments (30.2 measured equal sizes); 31.4's `incoming * 2` only ever covered the upload path, so an admin Rebuild had no headroom check at all | hls module - it decides whether a build may start |
+| 34.3 | `app/routes/admin.py _stream_action` | the MB pre-check now covers `rebuild` (copy) as well as `repair`, and the message says a build may evict LRU videos to make room | only repair was pre-checked, and "free cache space first" stopped being honest advice once 34.1 let a build free that space itself | admin videos table |
+| 34.4 | `app/storage.py ensure_space` docstring | replaced the backslash-escaped backticks left by an earlier scripted edit with the RST double backticks used by every other line of that docstring | a plain Python docstring renders a backslash literally, so the line printed an escape sequence nobody wrote on purpose | docs only |
+
+### 34.1 Change Log (2026-11-04 17:53:01)
+
+- **34.1** `app/storage.py`: `ensure_space(base_dir, incoming_bytes, app_config, peak_factor=None,
+  protect=None)` forwards `protect` to `_next_evict_candidate(base_dir, app_config, protected)`, which now
+  skips `video["id"] in protected_set` next to the existing "still uploading" skip. The 33.7 candidate rule
+  (a row with `local_filename` **or** `stream_dir`) is unchanged, so a segments-only cache entry stays
+  reclaimable - only the video about to be written is excluded. `app/hls.py` passes `protect=[video_id]`
+  and `watch.start_cache` does the same; `enforce_cache_limit` keeps its own `in_flight_ids` path (33.9).
+- **34.2** `app/hls.py ensure_stream`: the guard sits under the repair-slot branch inside the same `try`, so
+  both modes share it - `factor = 1.35 if mode == MODE_REPAIR else 2.0`, then `storage.ensure_space(
+  str(base.parent), source.stat().st_size, app_config, peak_factor=factor, protect=[video_id])`, raising
+  `StreamError("<mode> refused: needs ~N bytes of headroom above the free-space reserve")`. The existing
+  `except StreamError` handler turns that into `stream_state='failed'`, deletes `stream.tmp/` and leaves
+  the source MP4 on disk, which is the behaviour `probe_hls_repair.py` asserts.
+- **34.3** `app/routes/admin.py`: one pre-check for both buttons, `needed = source * (1.35 repair / 2.0
+  copy)` against `free_space - reserve`, flashing "... needs about N MB of free headroom for this file,
+  this server has M MB: free cache space first (a build may evict LRU videos to make room)." The hard
+  guard stays `ensure_space` inside `ensure_stream`, because an admin page cannot be trusted to race with
+  an upload worker or another viewer's cache job.
+- **34.4** docstring text corrected in the lines 34.1 touched.
+### 34.2 Where an existing cached video gets segmented (the answer)
+
+Three call sites. Nothing else in the app builds a stream.
+
+| # | Call site | Fires when | Mode |
+|---|-----------|------------|------|
+| 1 | `app/drive_worker.py:198` `hls.ensure_stream(..., reason="post-mirror")` | a mirror job finishes and the row goes `ready` - **new uploads and re-uploads only**; rows already `ready` are never re-processed | copy |
+| 2 | `app/routes/watch.py:269` `hls.ensure_stream(..., reason="post-download")` | the background `_run_cache` worker finishes re-downloading the file from Drive (watch page "Download & play") | copy |
+| 3 | `app/routes/admin.py:422` `hls.start_build(...)`, fed by `POST /admin/videos/<id>/stream/rebuild` (copy) and `POST /admin/videos/<id>/stream/repair` (repair) | an admin clicks the button, and `source_path_for` finds a local MP4 - otherwise the request redirects with the download-it-first flash | copy or repair |
+
+Never a build: every viewer-facing route is read-only (`/hls/playlist.m3u8`, `/hls/<asset>`, `/stream`,
+`/download`), and there is no cron, queue or scan that backfills videos whose `stream_state` is `none`.
+The existing library therefore does not segment itself: it needs a re-upload (1), a re-cache (2) or
+Repair GOP (3).
+
+Undoing a tree: `storage.delete_local_cache` and LRU eviction `rmtree` the whole video folder and set
+`stream_dir = NULL`, `stream_state = 'none'`; `watch.py:110` calls `hls.mark_stale` when a stored tree
+fails `validate_stream` on read; `hls_enabled = false` makes `ensure_stream` return on its first line.
+
+Current effect on users: none. `config.json` on this dev box has no `hls_*` keys, so `hls.settings()`
+falls back to `enabled = False` (`app/hls.py:107`) and all three entry points return immediately.
+
+### 34.3 What is waiting on the VPS when the flag is flipped (re-measured 2026-11-04 17:53:01 over ssh)
+
+| measure | value |
+|---------|-------|
+| rows in `videos` | 94 |
+| rows naming a local MP4 | 91 |
+| rows whose MP4 is actually on disk | 86 (3 with `local_filename` NULL: ids 7/14/15; 5 whose file is gone: ids 22/24/26/27/28) |
+| bytes / duration of those 86 files | 6,260 MB / 14,384.8 s |
+| `du -sm storage/videos` | 6,261 MB |
+| free space on `/` | 10,094 MB (12,447 of 23,585 used) |
+| `videos.stream_*` columns | absent - the 33.8 migration will run once, cleanly |
+| ffmpeg | 8.0.1-3ubuntu2 |
+| full-library Repair GOP budget | ~0.65x realtime measured in 32.0, so about 6 h of one core for 14,385 s of video, one repair at a time |
+
+None of those 86 files is segmented by any of them sitting there: (1) only runs for a new mirror job and
+(2) only when a viewer pulls the file back off Drive. So 33.5 step 6 - Repair GOP per video - stays the
+way to convert the existing library without a re-upload, and the 34.1/34.2 guards are what keep a repair
+on 10 GB of free space from eating its own source.
+
+### 34.4 Dev-box inventory, and one honest gap
+
+| measure | value |
+|---------|-------|
+| rows | 8 |
+| rows with a local MP4 on disk | 5 (ids 36/37/38/41/42), 571 MB / 715.4 s |
+| rows with no local file | 3 (ids 20/32/33) |
+| `videos.stream_*` columns | present - the migration already ran here |
+
+`storage/videos/` also holds names no DB row owns: `79078584e925fdfc.mp4` (27,615,193 B),
+`a6ee2a8c18a106a0.mp4` (27,615,193 B), `HELLDIVERS2-2026-02-2315-36-54.mp4` (835,703,279 B), the empty
+folders `.segments/`, `2ce21cff12a7b8ad/`, `7d75aa19a2255172/` and the probe leftover
+`probehlsflow123456/stream`. `actual_cache_bytes()` and `_next_evict_candidate` walk DB rows, so about
+891 MB of orphans is neither counted against the admin cache cap nor evictable. **Deferred**, not fixed
+in this session and not registered as approved: an orphan sweep (admin listing + delete).
+
+### 34.5 Verification (2026-11-04 17:53:01, project venv)
+
+- `python -m compileall -q app main.py wsgi.py testing` - exit 0.
+- `python -m pyright app` - 0 errors, 0 warnings, 0 informations.
+- `python testing/run_probes.py --timeout 90` - **19/19 probes passed**. `probe_hls_flow.py` (1.0 s) and
+  `probe_hls_repair.py` (1.2 s) are the two that touch this code; the repair probe's forced-failure case
+  (`storage.ensure_space = lambda *a, **k: False`, line 187) still refuses, still leaves the source MP4
+  intact and still lands on `failed`, because its stub swallows the new `protect` kwarg.
+- VPS numbers re-read over ssh: `rows 94 nonnull 91 on_disk 86 mib 6260 dur 14384.8`, `stream_cols []`,
+  `null_local [7, 14, 15]`, `missing_file [22, 24, 26, 27, 28]`, `df -m /` 10,094 MB free.
+- Dev numbers from `testing/inv_local.py` (untracked helper; `.gitignore` covers `testing/*`).
+
+### 34.6 Still unverified
+
+33.6 stands unchanged and nothing here narrows it: no build has run on the VPS, no browser has been
+observed playing AV1 over HLS, no real ~1 GB repair has been run, Watch Together over HLS has had no
+two-browser session, and the new guards have only been exercised against 20-30 s fixtures. This session
+changed code on the dev box only.

@@ -166,7 +166,7 @@ def start_cache(video_id: int) -> Any:
     from .. import storage
     incoming = int(video.get("size_bytes") or 0)
     if incoming and not storage.ensure_space(
-        os.path.dirname(videos_dir), incoming, current_app.config
+        os.path.dirname(videos_dir), incoming, current_app.config, protect=[video_id],
     ):
         return (
             jsonify(ok=False, error="Not enough free disk space on this server."),

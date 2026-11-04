@@ -512,20 +512,24 @@ def ensure_stream(
                 return state_now
             holding_repair_slot = True
 
-            # 32.4: a repair holds the source, repaired.mp4 and its segments at the
-            # same time, so it asks for 1.35x the source ABOVE the free-space reserve
-            # (measured output was 63 % of the source, 32.0). Refusing here is much
-            # cheaper than dying 25 minutes into a 30-minute encode.
-            from . import storage
+        # 32.4 + 33.8: every build reserves its disk before ffmpeg starts. A repair
+        # holds the source, repaired.mp4 and its segments at once (1.35x - measured
+        # output 63 % of the source, 32.0); a copy build briefly holds the source AND
+        # a near-complete duplicate of it as segments (2.0x, 30.2). Refusing here is
+        # far cheaper than dying 25 minutes into a 30-minute encode, and the video
+        # being built is protected so its own reservation cannot evict its source.
+        from . import storage
 
-            source_bytes = source.stat().st_size
-            if not storage.ensure_space(
-                str(base.parent), source_bytes, app_config, peak_factor=1.35,
-            ):
-                raise StreamError(
-                    "repair refused: needs ~%d bytes of headroom above the reserve"
-                    % int(source_bytes * 1.35)
-                )
+        source_bytes = source.stat().st_size
+        factor = 1.35 if mode == MODE_REPAIR else 2.0
+        if not storage.ensure_space(
+            str(base.parent), source_bytes, app_config,
+            peak_factor=factor, protect=[video_id],
+        ):
+            raise StreamError(
+                "%s refused: needs ~%d bytes of headroom above the free-space reserve"
+                % (mode, int(source_bytes * factor))
+            )
 
         db.update_video(video_id, stream_state=busy)
         tmp_dir = stream_dir.parent / (stream_dir.name + TMP_SUFFIX)

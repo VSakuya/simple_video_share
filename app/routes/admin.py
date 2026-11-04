@@ -398,25 +398,26 @@ def _stream_action(video_id: int, mode: str) -> Any:
             "error",
         )
         return redirect(url_for("admin.videos"))
-    if mode == hls.MODE_REPAIR:
-        # 32.4 pre-check; the hard guard lives in hls.ensure_stream. A repair that
-        # is going to run out of disk is refused here rather than 25 minutes in,
-        # while an admin is watching the badge.
-        from .. import storage
+    # 32.4 + 33.8 pre-check; the hard guard lives in hls.ensure_stream. A job that is
+    # going to run out of disk is refused here - in MB, while an admin is watching the
+    # badge - rather than 25 minutes into an encode or halfway through a remux.
+    from .. import storage
 
-        source_bytes = source.stat().st_size
-        needed = int(source_bytes * 1.35)
-        headroom = storage.free_space_bytes(str(videos_dir.parent)) - storage.min_free_space_bytes(
-            current_app.config
+    source_bytes = source.stat().st_size
+    factor = 1.35 if mode == hls.MODE_REPAIR else 2.0
+    needed = int(source_bytes * factor)
+    headroom = storage.free_space_bytes(str(videos_dir.parent)) - storage.min_free_space_bytes(
+        current_app.config
+    )
+    if headroom < needed:
+        flash(
+            "%s needs about %d MB of free headroom for this file, this server has %d MB: "
+            "free cache space first (a build may evict LRU videos to make room)."
+            % ("Repair" if mode == hls.MODE_REPAIR else "Rebuild",
+               needed // 1048576, max(headroom, 0) // 1048576),
+            "error",
         )
-        if headroom < needed:
-            flash(
-                "Repair needs about %d MB of free headroom for this file, this server "
-                "has %d MB: free cache space first."
-                % (needed // 1048576, max(headroom, 0) // 1048576),
-                "error",
-            )
-            return redirect(url_for("admin.videos"))
+        return redirect(url_for("admin.videos"))
 
     started = hls.start_build(
         videos_dir, video, current_app.config, mode=mode, reason="admin",
