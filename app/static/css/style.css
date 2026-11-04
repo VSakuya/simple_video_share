@@ -1167,6 +1167,11 @@ button:disabled { opacity: 0.55; cursor: not-allowed; filter: none; }
 .vt-size { white-space: nowrap; }
 /* Admin videos table (§16.13c): owner shown as a small avatar + name in one
    cell, reusing the avatar-border convention. */
+.admin-video-row [data-stream-state] {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+}
 .admin-owner { display: inline-flex; align-items: center; gap: 6px; }
 .admin-owner__avatar {
   width: 20px; height: 20px; border-radius: 50%; object-fit: cover;
