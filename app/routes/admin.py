@@ -196,9 +196,19 @@ def videos() -> str:
     """All videos: view, pin (§16.6) or delete."""
     from .. import batch
 
+    # §38: "Cached" has to mean what the home cards already mean - this server
+    # holds media for the row, either its MP4 copy or a ready HLS tree. A repaired
+    # video under hls_keep_source false has no local_filename at all yet still
+    # occupies its segments, so the column read "no" beside a Drop cache button
+    # that had 1.5 GB to free.
+    videos_dir = Path(current_app.config["VIDEOS_DIR"])
+    rows = db.list_all_videos()
+    for row in rows:
+        row["has_cached_media"] = storage.has_local_media(videos_dir, row)
+
     return render_template(
         "admin_videos.html",
-        videos=db.list_all_videos(),
+        videos=rows,
         hls_batch=batch.status(),
     )
 

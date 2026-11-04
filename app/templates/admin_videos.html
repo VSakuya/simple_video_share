@@ -73,7 +73,8 @@
             </td>
             <td class="vt-uploaded muted" data-ts="{{ video['uploaded_at'] if video['uploaded_at'] else '' }}"></td>
             <td>{{ video['status'] }}</td>
-            <td data-cached>{{ 'yes' if video['local_filename'] else 'no' }}</td>
+            {# §38: has_cached_media = MP4 copy OR ready HLS tree, the home-card rule. #}
+            <td data-cached>{{ 'yes' if video['has_cached_media'] else 'no' }}</td>
             {# 31.8/32.3: HLS state. 'none' means "nothing built yet" - a video with
                a long keyframe interval stays 'none' until a repair runs. #}
             <td>

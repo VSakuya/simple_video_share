@@ -5081,3 +5081,146 @@ the admin already committed to.
   replaces it with a recorder, so the Drive-side deletion is verified by the arguments
   it was called with, not by a file actually disappearing from Drive.
 
+## 38. A video this server serves from its own segments is still cached (Session: 2026-11-05 00:17:30)
+
+### 38.0 The report: 125 left the home page after Repair GOP
+
+Report: after pressing **Repair GOP** on `https://video.vsakuya.xyz/watch/125`, that video
+stopped appearing on the home page. Everything below was measured on the VPS before a line
+of code was written.
+
+- Row 125 (`【终末地】…（导演剪辑版）`, owner 2 VSakuya, root folder, `status=ready`,
+  1 005 551 388 B, 1151.87 s at 60 fps, Drive id `1WTGuXknxbZwAs_RCkpmLNLaxO9Dq-Zmq`):
+  `local_filename = NULL`, `stream_dir = c305f7f2862de533.stream`, `stream_state = ready`,
+  `stream_source = repair`.
+- The repair itself succeeded end to end (`storage/logs/app.log` 3652-3661). Two copy-only
+  attempts were discarded first - `id=125 copy-only tree discarded: longest segment 166.7s
+  against a 6s target means a keyframe interval of the same length; keeping the MP4 so an
+  admin can run Repair GOP` - then 10:13:45 started the encode
+  (`-c:v libx264 -preset ultrafast -crf 26 -g 360 -keyint_min 360 -sc_threshold 0 -threads 1`;
+  `-g 360` is 6 s x 60 fps, i.e. exactly `hls_segment_seconds`), 10:54:52 cut the tree from
+  the repaired MP4, and 10:55:22 closed it:
+  `id=125 stream ready (repair, 192 segments, longest 6.0s, 1553814994 bytes, reason=admin)`,
+  followed by `WARNING repaired segments are 154% of the source it replaces (1553814994 vs
+  1005551388 bytes); a higher hls_repair_crf would make them smaller` and
+  `INFO id=125 dropped local MP4 (admin) - cache is segments-only`. 41 minutes on one core.
+- Disk agrees with the log: 194 entries in `storage/videos/c305f7f2862de533.stream/`
+  (`master.m3u8`, `init.mp4`, `seg-000…seg-191`), and the 1.0 GB MP4 is gone. That drop is
+  31.1 honouring `hls_keep_source: false`, not damage.
+- **No server ever hid this card.** `_resolve_drive` logs every card it drops as
+  `home: hiding video id=… title=… (no local copy, Drive file probe-gone gone)`, and
+  `grep -n "hiding video" storage/logs/*.log` returns **zero hits** in 3682 lines.
+  `grep -n -i "evict\|freed"` is empty too, so the cache cap never touched 125, and none of
+  the home-page queries has a LIMIT.
+- The card is on the page now: logged in with the 37.5 test account, `GET /` →
+  `cards=94 has125=True`, the card carries `card__remote` ("Remote"), and `GET /watch/125`
+  → 200, and the `<video>` in it points at `/watch/125/hls/playlist.m3u8`.
+- Repair GOP is a plain form POST, not `data-async` (36.1), so pressing it reloads the
+  **admin Videos table**; the home page it was compared against is a different document.
+
+The symptom is therefore unreproduced, and the surviving candidates are both client-side or
+observational: `home.html:170-177` sets `card.hidden` when a search / Uploader / Tag filter
+does not match and `style.css:225 [hidden] { display: none !important; }` makes that look
+identical to a deletion; or the home page was looked at while the 10:13 → 10:55 encode was
+still running. What the report did surface is a real defect, and it is one row away from the
+exact symptom described.
+
+### 38.1 The defect: "cached" was measured by one column
+
+`app/routes/home.py::_resolve_drive` decided everything from `local_filename`:
+
+    is_cached = bool(local) and os.path.exists(os.path.join(base, local))
+
+Before 31.1 that was the whole story. Now a row can hold its media as an HLS tree with
+`local_filename` cleared, and for such a row the old line got two things wrong at once:
+
+1. **The badge lied.** `home.html:85-86` renders `card__remote` whenever `is_cached` is
+   false, so 125 - which this server is serving out of 192 local segment files - is badged
+   "Remote", telling the reader that watching it costs a Drive round trip.
+2. **The card hung on a Drive call.** With no local answer, keeping it requires
+   `drive.exists`, and `drive.py:173-174` caches a definitive result for
+   `_EXISTS_TTL_SECONDS = 120.0` (`_EXISTS_UNKNOWN_TTL_SECONDS = 30.0`). One 404 - expired
+   token, quota flap, file momentarily unreadable - removes a fully playable video for two
+   minutes. That is precisely the reported shape: *a video disappeared from the home page*.
+   The only four Drive failures in the log are from 2026-10-08
+   (`Unable to find the server at oauth2.googleapis.com`), which returned `None` and were
+   correctly kept; a definitive `False` has never happened on this server, so the failure
+   mode was latent rather than observed.
+3. **Cost.** ~70 Drive-only rows mean ~70 existence calls per home page load, recurring
+   every 120 s, for rows this server already knows it holds nothing for.
+
+`storage.has_local_media` is the shallow half of `is_locally_playable`. The deep predicate
+runs `hls.validate_stream` - re-reads the playlist and stats every segment, ~192 stats for
+125 - which is right for a watch page and absurd for 94 cards. A listing only needs "is
+there media here" (two stats) to decide whether to ask Drive and whether to say "Remote".
+
+### 38.2 The change
+
+- `app/storage.py:324` - new `has_local_media(videos_dir, video)`: the local MP4 `is_file()`
+  **or** (`stream_state == hls.STATE_READY` **and** `<stream_dir>/master.m3u8` is_file), with
+  a lazy `from . import hls` so `storage` stays importable on its own.
+- `app/routes/home.py:160` - `_resolve_drive` asks that instead, and `import os` plus
+  `base = str(videos_dir)` left with the old rule. `is_cached=True` still short-circuits the
+  Drive call, so a repaired video is kept, badged as cached, and costs nothing.
+- `app/routes/admin.py:204-212` and `app/templates/admin_videos.html:76` - the admin Videos
+  table had the same defect in its own `Cached` column: it read `video['local_filename']`, so
+  125 said "no" on the same row whose **Drop cache** button (35) had 1 553 814 994 B to free.
+  Rows are annotated with `has_cached_media` from the same helper and the template uses that
+  key. The async drop-cache handler still rewrites the cell to `no` without a reload.
+
+Deliberately not changed: `app/sql/videos/list_lru_cached.sql` already counts
+`stream_dir IS NOT NULL` and `storage._next_evict_candidate` treats segments-only rows as
+evictable, so the cache cap can still reclaim a repaired video's 1.5 GB; and
+`is_locally_playable` stays deep for the watch / together pages.
+
+### 38.3 Verification (2026-11-05 00:11 - 00:16, project venv)
+
+New `testing/probe_home_stream_only.py` - five fixtures, and no network at all:
+`drive.exists` is replaced by a recorder and `get_drive_quota` by `None`.
+
+- **A** stream-only row (ready tree, `local_filename` NULL) stays on the page, carries no
+  `card__remote`, and makes **zero** Drive calls.
+- **B** Drive-only row stays, badged Remote, exactly one call.
+- **C** a row with neither local media nor a Drive id is not rendered.
+- **D** a row claiming `ready` whose tree is actually gone falls back to the Drive answer.
+- **E** Drive says the file is gone → the card is dropped **and** the `hiding video` log line
+  is emitted, proving the drop rule still works.
+
+Guard proof: with home.py's new condition swapped back to
+`bool(video.get("local_filename"))  # TEMP-OLD-RULE` the probe exits 1 with
+`FAIL: a video this server serves from its own cache is badged Remote: href="/watch/260" …
+<span class="card__remote`; restored afterwards.
+
+`testing/probe_admin_cache_drop.py` step 2 grew the admin half (new `_cached_cell` reader on
+the rendered table): `Probe Drop Cache` (MP4 + tree) → yes, `Probe Cached Segments` (tree
+only, MP4 unlinked, `local_filename` NULL) → yes, `Probe Cached Nothing` (folder removed) →
+no. Same guard proof: `admin.py` back on `bool(row.get("local_filename"))` fails it with
+`§38: a video this server serves from its own segments read as uncached`.
+
+- `testing/run_probes.py --timeout 90`: **23/23** (22/22 before; `probe_home_stream_only.py`
+  is the addition).
+- `pyright app`: 0 errors / 0 warnings. `python -m compileall -q app main.py`: clean.
+- Live confirmation (`testing/_peek_live_home.py`, real HTTPS with the test account):
+  `cards=94 has125=True`, `/watch/125` → 200 with `/watch/125/hls/playlist.m3u8`.
+
+### 38.4 Deferred from this section
+
+- **The reported symptom is still unreproduced.** The server has never emitted a
+  `hiding video` line for 125 and the card is listed now. `home.html:170-177` is the only
+  mechanism found that can make a card vanish locally, and those three filters reset on
+  every reload. Resolving it needs the observer: was the row also missing from the admin
+  Videos table, and was a search / Uploader / Tag filter in the toolbar at the time?
+- **This fix is not deployed.** 38.2 is local only; until the next deploy 125 keeps the
+  "Remote" badge and keeps depending on a live Drive call to appear at all.
+- **Drive-only rows still cost one existence call each per page load** (~70 today), with the
+  120 s `_exists_cache` as the only thing making that tolerable. The cheaper answer is a
+  cache flag maintained on the row itself, or a long TTL for `google_drive_file_id` values
+  that never change.
+- **GOP repair costs bytes, not only CPU.** 125 became 1 553 814 994 B of segments in place
+  of a 1 005 551 388 B MP4 (+54%) because `hls_repair_crf = 26` re-encodes quality the
+  source had already spent 1.0 GB on. `Repair all` (36) would do that across 14 384.8 s of
+  cached video. A higher crf is the easy knob; the structural one is that inserting keyframes
+  into long-GOP H.264 cannot be done without a re-encode, so this cost is inherent to the
+  repair path as built.
+- 37.6 stands unchanged: orphans left by earlier deletes are still unreclaimed, and
+  `drive.delete_file` is still verified only by the arguments it was called with.

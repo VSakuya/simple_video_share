@@ -2,7 +2,6 @@
 
 import concurrent.futures
 import logging
-import os
 from typing import Any, List, Optional, Tuple
 
 from flask import Blueprint, current_app, render_template, send_from_directory
@@ -136,27 +135,29 @@ def _resolve_drive(
 ) -> Tuple[List[dict], Optional[int]]:
     """Apply the local-cache and Drive-existence filters concurrently.
 
-    Returns ``(kept, drive_free)``. ``kept`` are the videos to show: a video
-    with a local file is flagged ``is_cached=True``; one kept only because a
-    Drive copy still exists is flagged ``is_cached=False``. A video with no local
-    file whose Drive file is gone (definitive 404) is dropped, while a ``None``
-    from :func:`drive.exists` (API unavailable) keeps it so a transient error
-    never hides a valid video. ``drive_free`` is the remaining Drive quota in
+    Returns ``(kept, drive_free)``. ``kept`` are the videos to show: a video this
+    server holds media for - its MP4 copy or a ready HLS tree (§38) - is flagged
+    ``is_cached=True`` and needs no Drive call at all; one kept only because a
+    Drive copy still exists is flagged ``is_cached=False``. A video with nothing
+    on disk whose Drive file is gone (definitive 404) is dropped, while a
+    ``None`` from :func:`drive.exists` (API unavailable) keeps it so a transient
+    error never hides a valid video. ``drive_free`` is the remaining Drive quota in
     bytes, or ``None`` when the API is unavailable.
 
     Every Drive call (the per-video existence checks plus the single quota read)
     runs in parallel so the page costs ~one network round trip instead of one
     per video.
     """
-    base = str(videos_dir)
     kept: List[dict] = []
     pending: List[Tuple[dict, str]] = []
     for video in videos:
-        local = video.get("local_filename")
-        # §16.4: annotate whether a locally playable copy exists so the home
-        # card can badge non-cached (Drive-only) videos.
-        is_cached = bool(local) and os.path.exists(os.path.join(base, local))
-        if is_cached:
+        # §16.4: annotate whether this server holds media for the row so the card
+        # can badge the Drive-only ones. §38: "holds media" means its MP4 copy OR a
+        # ready HLS tree, because keep_source false deliberately clears
+        # local_filename - a repaired video must not depend on a live Drive call
+        # to stay on the page, and must not be badged "Remote" while its segments
+        # are sitting in this server's own cache.
+        if storage.has_local_media(videos_dir, video):
             video["is_cached"] = True
             kept.append(video)
             continue

@@ -321,6 +321,33 @@ def remove_stored_file(dest_dir: Path, filename: Optional[str], label: str) -> N
         print(f"warn: could not remove {label} {path}: {exc}", file=sys.stderr)
 
 
+def has_local_media(videos_dir, video: dict) -> bool:
+    """Cheap "does this server hold any media for this row", for listings.
+
+    The same two shapes :func:`is_locally_playable` knows about - the local MP4
+    copy, and the HLS tree that ``hls_keep_source`` leaves behind after it drops
+    that copy (§31.1) - but shallow: two ``stat`` calls instead of re-reading a
+    192-segment playlist for every card on a home page. A listing only has to
+    decide whether it must ask Drive about the row and whether the card should
+    say "Remote"; the watch pages keep the deep, playlist-validating predicate.
+
+    §38 is why this exists: once ``local_filename`` is cleared, a repaired
+    video's card was held up by a live Drive existence call alone, so one
+    definitive Drive 404 - or the 120 s a wrong ``False`` sits in
+    ``drive._exists_cache`` - hid a video whose segments this server has on disk
+    and is happily serving.
+    """
+    base = Path(videos_dir)
+    local = video.get("local_filename")
+    if local and (base / str(local)).is_file():
+        return True
+    from . import hls  # lazy import: storage stays importable on its own
+    if str(video.get("stream_state") or "") != hls.STATE_READY:
+        return False
+    stream_dir = hls.stream_dir_for(base, video)
+    return bool(stream_dir) and (stream_dir / hls.PLAYLIST_NAME).is_file()
+
+
 def is_locally_playable(videos_dir, video: dict) -> bool:
     """True when a video can be played from this server with no Drive round trip.
 
