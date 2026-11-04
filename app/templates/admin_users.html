@@ -48,5 +48,12 @@
       </table>
     </div>
   </section>
+  <script>
+    window.svsAsyncActions = window.svsAsyncActions || {};
+    window.svsAsyncActions['user-role'] = function (form, data) {
+      var row = form.closest('tr');
+      if (row && data.html) row.outerHTML = data.html;
+    };
+  </script>
 </div>
 {% endblock %}

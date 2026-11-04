@@ -381,6 +381,26 @@ def create_user() -> Any:
     return redirect(url_for("admin.users"))
 
 
+@admin_bp.route("/users/<int:user_id>/role", methods=["POST"])
+@admin_required
+def set_user_role(user_id: int) -> Any:
+    value = request.form.get("is_admin")
+    if value not in ("0", "1"):
+        return _user_action_answer(False, "Invalid role.")
+    me = current_user()
+    assert me is not None
+    ok, message = db.set_user_admin(me["id"], user_id, value == "1")
+    if not ok:
+        return _user_action_answer(False, message)
+    user = next((u for u in db.list_users() if u["id"] == user_id), None)
+    if user is None:
+        return _user_action_answer(False, "User no longer exists.")
+    role = "administrator" if value == "1" else "regular user"
+    logger.info("admin: user_id=%s changed user_id=%s role to %s", me["id"], user_id, role)
+    html = render_template("_user_row.html", u=user)
+    return _user_action_answer(True, f"{user['username']} is now a {role}.", html=html, user_id=user_id, is_admin=value == "1")
+
+
 @admin_bp.route("/users/<int:user_id>/delete", methods=["POST"])
 @admin_required
 def delete_user(user_id: int) -> Any:

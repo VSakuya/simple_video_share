@@ -5244,3 +5244,14 @@ no. Same guard proof: `admin.py` back on `bool(row.get("local_filename"))` fails
 - Validation: nine isolated Python regression tests (including real FFmpeg, old-version
   playback, restart recovery and authenticated admin rendering), Node retry checks,
   JavaScript syntax checks and pyright. No live videos or Drive objects changed.
+
+### 2026-11-05 — Change existing users' administrator roles
+
+- Added Make admin / Remove admin actions to the user-management table, with
+  confirmation and in-place row updates. The current account cannot demote itself.
+- POST changes require an administrator and the existing CSRF guard. The database
+  serializes role changes and rechecks the actor inside the transaction, preventing
+  concurrent mutual demotion from removing every administrator. No schema change.
+- Validation: 13 isolated regression tests pass, including promotion/demotion,
+  immediate permission changes, CSRF, invalid input, self/last-admin protection,
+  concurrent role changes and rendered user-management controls; pyright passes.

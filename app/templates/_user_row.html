@@ -19,6 +19,17 @@
     <code class="user-row__hash" title="{{ u['password_hash'] }}">{{ u['password_hash'][:12] }}…</code>
   </td>
   <td class="row-actions">
+    {% if not current_user_obj or u['id'] != current_user_obj['id'] %}
+    <form method="post" action="{{ url_for('admin.set_user_role', user_id=u['id']) }}"
+          data-async data-async-action="user-role"
+          data-confirm="{{ 'Remove administrator access from' if u['is_admin'] else 'Grant administrator access to' }} {{ u['username'] }}?">
+      {{ csrf_field() }}
+      <input type="hidden" name="is_admin" value="{{ '0' if u['is_admin'] else '1' }}">
+      <button type="submit" class="btn btn--sm">{{ 'Remove admin' if u['is_admin'] else 'Make admin' }}</button>
+    </form>
+    {% else %}
+    <span class="muted">Your account</span>
+    {% endif %}
     <form method="post" action="{{ url_for('admin.delete_user', user_id=u['id']) }}"
           data-async data-async-remove="tr"
           data-confirm="Delete {{ u['username'] }} and everything they own (videos, Drive copies, local cache, comments, live room)? This cannot be undone.">

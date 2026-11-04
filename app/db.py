@@ -295,6 +295,29 @@ def get_user_by_id(user_id: int) -> Optional[dict[str, Any]]:
     return dict(row) if row else None
 
 
+def set_user_admin(actor_id: int, user_id: int, is_admin: bool) -> tuple[bool, str]:
+    """Change a role under a write lock, rechecking the actor after serialization."""
+    conn = get_db()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        actor = conn.execute(_sql("users", "get_by_id"), (actor_id,)).fetchone()
+        user = conn.execute(_sql("users", "get_by_id"), (user_id,)).fetchone()
+        if actor is None or not actor["is_admin"]:
+            return False, "Administrator permission is required."
+        if user is None:
+            return False, "User not found."
+        if not is_admin and user["is_admin"]:
+            if conn.execute(_sql("users", "count_admins")).fetchone()[0] <= 1:
+                return False, "The last administrator cannot be demoted."
+            if actor_id == user_id:
+                return False, "You cannot remove your own administrator role."
+        conn.execute(_sql("users", "set_admin"), (int(is_admin), user_id))
+        conn.commit()
+        return True, "Role updated."
+    finally:
+        conn.close()
+
+
 def list_users() -> list[dict[str, Any]]:
     conn = get_db()
     rows = conn.execute(_sql("users", "list")).fetchall()

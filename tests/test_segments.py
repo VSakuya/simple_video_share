@@ -131,6 +131,66 @@ class SegmentsTest(unittest.TestCase):
         if shutil.which('node'):
             subprocess.run(['node', '--check'], input=script, text=True, check=True, capture_output=True)
         self.assertEqual(client.get('/admin/videos/stream/progress').status_code, 200)
+        other = db.create_user('page-member', 'unused', is_admin=0)
+        users = client.get('/admin/users')
+        self.assertEqual(users.status_code, 200)
+        self.assertIn(f'action="/admin/users/{other}/role"', users.text)
+        self.assertNotIn(f'action="/admin/users/{self.uid}/role"', users.text)
+        self.assertIn('Make admin', users.text)
+        script = '\n'.join(re.findall(r'<script>([\s\S]*?)</script>', users.text))
+        if shutil.which('node'):
+            subprocess.run(['node', '--check'], input=script, text=True, check=True, capture_output=True)
+
+    def role_context(self):
+        from app import auth, csrf
+        self.app.context_processor(lambda: {'current_user_obj': auth.current_user(), 'csrf_field': csrf.csrf_field})
+
+    def test_role_promotion_demotion_and_permissions(self):
+        self.role_context()
+        other = db.create_user('member', 'unused', is_admin=0)
+        headers = {'X-Requested-With': 'XMLHttpRequest'}
+        url = f'/admin/users/{other}/role'
+        response = self.client.post(url, data={'is_admin': '1'}, headers=headers)
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertIn('Remove admin', response.json['html'])
+        self.assertTrue(db.get_user_by_id(other)['is_admin'])
+        member = self.app.test_client()
+        with member.session_transaction() as session:
+            session['user_id'] = other
+        self.assertEqual(member.get('/admin/videos/stream/progress').status_code, 200)
+        response = self.client.post(url, data={'is_admin': '0'}, headers=headers)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('Make admin', response.json['html'])
+        self.assertEqual(member.get('/admin/videos/stream/progress').status_code, 403)
+        self.assertEqual(member.post(url, data={'is_admin': '1'}, headers=headers).status_code, 403)
+
+    def test_role_validation_and_self_protection(self):
+        self.role_context()
+        headers = {'X-Requested-With': 'XMLHttpRequest'}
+        url = f'/admin/users/{self.uid}/role'
+        self.assertEqual(self.client.post(url, data={'is_admin':'0'}, headers=headers).status_code, 400)
+        self.assertTrue(db.get_user_by_id(self.uid)['is_admin'])
+        db.create_user('another-admin', 'unused', is_admin=1)
+        self.assertEqual(self.client.post(url, data={'is_admin':'0'}, headers=headers).status_code, 400)
+        self.assertEqual(self.client.post(url, data={'is_admin':'yes'}, headers=headers).status_code, 400)
+        self.assertEqual(self.client.post('/admin/users/999999/role', data={'is_admin':'1'}, headers=headers).status_code, 400)
+
+    def test_concurrent_role_changes_recheck_actor(self):
+        from concurrent.futures import ThreadPoolExecutor
+        other = db.create_user('another-admin', 'unused', is_admin=1)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(lambda pair: db.set_user_admin(pair[0], pair[1], False), [(self.uid, other), (other, self.uid)]))
+        self.assertEqual(sum(bool(r[0]) for r in results), 1)
+        self.assertEqual(sum(bool(u['is_admin']) for u in db.list_users()), 1)
+
+    def test_role_requires_csrf(self):
+        from app import csrf
+        self.app.config['TESTING'] = False
+        self.app.before_request(csrf.protect)
+        other = db.create_user('member', 'unused', is_admin=0)
+        response = self.client.post(f'/admin/users/{other}/role', data={'is_admin':'1'}, headers={'X-Requested-With':'XMLHttpRequest'})
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(db.get_user_by_id(other)['is_admin'])
 
     def make_video(self):
         ffmpeg = shutil.which('ffmpeg')
