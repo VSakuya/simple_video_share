@@ -20,7 +20,7 @@
         </form>
         <form method="post" action="{{ url_for('admin.repair_all_streams') }}"
               data-async data-async-action="batch-start"
-              data-confirm="Repair the keyframe interval of every cached video that is not already repaired? Each one is re-encoded to H.264 on a single core, roughly 1 second of CPU per second of video, so a full library is hours of work. The Google Drive originals are not touched.">
+              data-confirm="Repair the keyframe interval of every cached video that needs keyframe repair? Each one is re-encoded to H.264 on a single core, roughly 1 second of CPU per second of video, so a full library is hours of work. The Google Drive originals are not touched.">
           {{ csrf_field() }}
           <button type="submit" class="btn btn--sm">Repair all</button>
         </form>
@@ -39,7 +39,7 @@
         <li>{{ note }}</li>
         {% endfor %}
       </ul>
-      <p class="hls-batch__note">Rebuild all is the cheap one (about 30x realtime). Repair all is the one that fixes the pre-30.1 library: about 1 second of single-core CPU per second of video, strictly one video at a time.</p>
+      <p class="hls-batch__note">Rebuild all is the cheap one (about 30x realtime). Repair all skips healthy streams and fixes long keyframe intervals: about 1 second of single-core CPU per second of video, strictly one video at a time.</p>
     </div>
     <div class="table-wrap">
       <table class="table">
@@ -80,7 +80,7 @@
             <td>
               {% set stream_state = video['stream_state'] or 'none' %}
               <span class="card__tag" data-stream-state title="HLS stream state (31.1)">
-                {{ stream_state }}{% if stream_state == 'ready' and video['stream_source'] %} · {{ video['stream_source'] }}{% endif %}
+                {{ video['stream_actions']['label'] }}
               </span>
               <div data-repair-progress hidden aria-live="polite">
                 <progress data-repair-bar max="100" style="width:100%"></progress>
@@ -99,15 +99,15 @@
               {{ csrf_field() }}
                 <button type="submit" class="btn btn--sm">{{ 'Unpin' if video['is_pinned'] else 'Pin' }}</button>
               </form>
-              <form method="post" action="{{ url_for('admin.rebuild_stream', video_id=video['id']) }}"
+              <form data-stream-action="rebuild"{% if not video['stream_actions']['can_rebuild'] %} hidden{% endif %} method="post" action="{{ url_for('admin.rebuild_stream', video_id=video['id']) }}"
                     data-confirm="Rebuild the HLS segments of this video from its local copy? This is a copy-only remux (no re-encode).">
               {{ csrf_field() }}
-                <button type="submit" class="btn btn--sm">Rebuild stream</button>
+                <button type="submit" class="btn btn--sm"{% if not video['stream_actions']['can_rebuild'] %} disabled{% endif %}>Rebuild stream</button>
               </form>
-              <form method="post" action="{{ url_for('admin.repair_stream', video_id=video['id']) }}"
+              <form data-stream-action="repair"{% if not video['stream_actions']['can_repair'] %} hidden{% endif %} method="post" action="{{ url_for('admin.repair_stream', video_id=video['id']) }}"
                     data-confirm="Repair this video's keyframe interval? The server re-encodes it to H.264 on one core (roughly 1 s per second of video). The Google Drive original is not touched.">
               {{ csrf_field() }}
-                <button type="submit" class="btn btn--sm">Repair GOP</button>
+                <button type="submit" class="btn btn--sm"{% if not video['stream_actions']['can_repair'] %} disabled{% endif %}>Repair GOP</button>
               </form>
               <form method="post" action="{{ url_for('admin.delete_video_cache', video_id=video['id']) }}"
                     data-async data-async-action="drop-cache"
@@ -143,15 +143,21 @@
           (data.jobs || []).forEach(function (job) {
             var row = document.querySelector('[data-video-id="' + job.video_id + '"]');
             if (!row) return;
+            row.querySelector('[data-stream-state]').textContent = job.actions.label;
+            ['rebuild', 'repair'].forEach(function (action) {
+              var form = row.querySelector('[data-stream-action="' + action + '"]');
+              form.hidden = !job.actions['can_' + action];
+              form.querySelector('button').disabled = form.hidden;
+            });
             var box = row.querySelector('[data-repair-progress]');
-            box.hidden = false;
+            box.hidden = job.stage === 'idle';
+            if (job.stage === 'idle') return;
             var bar = box.querySelector('[data-repair-bar]');
             if (job.percent == null) bar.removeAttribute('value');
             else bar.value = job.percent;
             bar.hidden = !job.running;
             box.querySelector('[data-repair-label]').textContent = (stages[job.stage] || job.stage) +
               (job.percent == null ? (job.processed_seconds ? ' · ' + Math.floor(job.processed_seconds) + ' s processed' : '') : ' · ' + job.percent + '%') + (job.error ? ': ' + job.error : '');
-            row.querySelector('[data-stream-state]').textContent = job.stream_state || 'none';
           });
         } catch (_) { /* retry on next poll */ }
         finally { window.setTimeout(pollRepairs, 2000); }

@@ -94,38 +94,18 @@ def _estimate(mode: str, duration_seconds: float) -> tuple[int, str]:
 # candidate rules (36.0 decision 2)
 # --------------------------------------------------------------------------
 def blocker_for(
-    videos_dir: Path | str, video: dict[str, Any], mode: str
+    videos_dir: Path | str, video: dict[str, Any], mode: str, app_config: Any = None
 ) -> Optional[str]:
-    """Why this row is not a candidate right now, or None when it is.
-
-    Re-read for every item, not only at plan time: a viewer can finish a stream,
-    an admin can drop a cache and a Drive pull can add a local copy while a batch is
-    walking its queue. A rule that was true an hour ago is not a fact about this run.
-
-    Copy mode leaves any ready tree alone - rebuild-all exists to fill the rows with
-    no stream, not to re-cut a working one. Repair mode skips only rows already
-    repaired, because re-encoding them again buys nothing and costs an hour each.
-    The per-row buttons keep the 32.3 behaviour (they re-cut a tree built by the
-    other mode); a batch is the place where that choice is deliberately narrower.
-    """
-    state = str(video.get("stream_state") or hls.STATE_NONE)
-    if state in (hls.STATE_BUILDING, hls.STATE_REPAIRING):
-        return "a stream job is already running on it"
-    built = str(video.get("stream_source") or "")
-    if state == hls.STATE_READY:
-        if mode == hls.MODE_COPY:
-            return "its stream is already ready (%s)" % (built or hls.MODE_COPY)
-        if built == hls.MODE_REPAIR:
-            return "already repaired - its stream is ready (repair)"
-    if hls.source_path_for(videos_dir, video) is None:
-        return "no local copy on this server (download it from Drive first)"
-    return None
+    """Use the same eligibility as single-video admin actions."""
+    actions = hls.stream_actions(videos_dir, video, app_config)
+    return actions["repair_blocker" if mode == hls.MODE_REPAIR else "rebuild_blocker"]
 
 
 def plan(
     videos_dir: Path | str,
     mode: str,
     videos: Optional[list[dict[str, Any]]] = None,
+    app_config: Any = None,
 ) -> dict[str, Any]:
     """Split the library into candidate rows and skipped rows (36.0 decision 2).
 
@@ -139,7 +119,7 @@ def plan(
     skipped: list[tuple[int, str]] = []
     duration_seconds = 0.0
     for video in (videos if videos is not None else db.list_all_videos()):
-        reason = blocker_for(base, video, mode)
+        reason = blocker_for(base, video, mode, app_config)
         if reason is not None:
             skipped.append((int(video["id"]), reason))
             continue
@@ -233,7 +213,7 @@ def start(videos_dir: Path | str, app_config: Any, mode: str) -> tuple[bool, str
     if hls.ffmpeg_binary(cfg) is None:
         return False, "ffmpeg was not found on this server, so nothing can be segmented."
 
-    planned = plan(base, mode)
+    planned = plan(base, mode, app_config=app_config)
     candidates = planned["candidates"]
     if not candidates:
         return False, (
@@ -308,7 +288,7 @@ def _run(videos_dir: Path, app_config: Any, mode: str, video_ids: list[int]) -> 
         if video is None:
             _record(video_id, "skipped", "row no longer exists")
             continue
-        blocker = blocker_for(videos_dir, video, mode)
+        blocker = blocker_for(videos_dir, video, mode, app_config)
         if blocker is not None:
             _record(video_id, "skipped", blocker)
             continue

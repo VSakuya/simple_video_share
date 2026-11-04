@@ -52,3 +52,4 @@ documents/*
 # cloned and git-pulled (by start.sh) on every deploy. Copy it once by hand -
 # see README ("Run"). create_app logs a warning when it is absent.
 app/static/js/ffmpeg/ffmpeg-core.wasm
+.codex/AGENTS.md

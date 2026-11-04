@@ -192,6 +192,49 @@ class SegmentsTest(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertFalse(db.get_user_by_id(other)['is_admin'])
 
+    def test_stream_action_eligibility_and_batch_filter(self):
+        from app import batch
+        folder = self.base / 'eligibility'
+        tree = folder / 'stream'
+        tree.mkdir(parents=True)
+        (folder / 'source.mp4').write_bytes(b'source')
+        (tree / 'init.mp4').write_bytes(b'init')
+        (tree / 'seg-000.m4s').write_bytes(b'segment')
+        def playlist(seconds):
+            (tree / 'master.m3u8').write_text(f'#EXTM3U\n#EXT-X-MAP:URI="init.mp4"\n#EXTINF:{seconds},\nseg-000.m4s\n#EXT-X-ENDLIST\n')
+        playlist(2)
+        vid = db.create_video('eligibility', self.uid, None, 'eligibility/source.mp4', None, 6, duration=2)
+        db.update_video(vid, stream_state='ready', stream_source='copy', stream_dir='eligibility/stream')
+        video = db.get_video_by_id(vid)
+        cfg = self.app.config
+        with patch.object(hls, 'ffmpeg_binary', return_value='ffmpeg'):
+            actions = hls.stream_actions(self.base, video, cfg)
+            self.assertFalse(actions['can_rebuild'])
+            self.assertFalse(actions['can_repair'])
+            self.assertEqual(actions['label'], 'Ready · rebuilt')
+            for mode in ('copy', 'repair'):
+                self.assertEqual(batch.plan(self.base, mode, [video], app_config=cfg)['candidates'], [])
+            with patch.object(hls, 'start_build') as start:
+                for action in ('rebuild', 'repair'):
+                    response = self.client.post(f'/admin/videos/{vid}/stream/{action}', headers={'X-Requested-With':'XMLHttpRequest'})
+                    self.assertEqual(response.status_code, 400)
+                start.assert_not_called()
+            playlist(8)
+            video['duration'] = 8
+            actions = hls.stream_actions(self.base, video, cfg)
+            self.assertFalse(actions['can_rebuild'])
+            self.assertTrue(actions['can_repair'])
+            self.assertEqual(actions['label'], 'Rebuilt · needs repair')
+            self.assertEqual(len(batch.plan(self.base, 'repair', [video], app_config=cfg)['candidates']), 1)
+            video['stream_source'] = 'repair'
+            self.assertFalse(hls.stream_actions(self.base, video, cfg)['can_repair'])
+            self.assertEqual(hls.stream_actions(self.base, video, cfg)['label'], 'Ready · repaired')
+            (tree / 'seg-000.m4s').unlink()
+            self.assertTrue(hls.stream_actions(self.base, video, cfg)['can_rebuild'])
+            video['stream_state'] = 'repairing'
+            self.assertFalse(hls.stream_actions(self.base, video, cfg)['can_rebuild'])
+            self.assertFalse(hls.stream_actions(self.base, video, cfg)['can_repair'])
+
     def make_video(self):
         ffmpeg = shutil.which('ffmpeg')
         if not ffmpeg:

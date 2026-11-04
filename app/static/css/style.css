@@ -1148,6 +1148,7 @@ button:disabled { opacity: 0.55; cursor: not-allowed; filter: none; }
 }
 .row-actions { text-align: right; white-space: nowrap; }
 .row-actions form { display: inline; }
+.row-actions form[hidden] { display: none; }
 .row-actions form + form { margin-left: 8px; }
 /* Pico forces width:100% on button[type=submit]; keep table action buttons inline. */
 .row-actions .btn { width: auto; }

@@ -5255,3 +5255,17 @@ no. Same guard proof: `admin.py` back on `bool(row.get("local_filename"))` fails
 - Validation: 13 isolated regression tests pass, including promotion/demotion,
   immediate permission changes, CSRF, invalid input, self/last-admin protection,
   concurrent role changes and rendered user-management controls; pyright passes.
+
+### 2026-11-05 — Skip redundant stream operations
+
+- Single-video controls, direct admin POSTs and batch planning now share stream
+  eligibility. A validated stream cannot be rebuilt; repaired streams and copy
+  streams with suitable segment/keyframe intervals do not need repair. Missing
+  or invalid files remain eligible when a local source exists. Busy jobs are skipped.
+- Stream badges distinguish Ready / rebuilt, Ready / repaired, Needs repair,
+  missing streams and active jobs. Polling updates both badges and action buttons.
+- Ineligible controls are hidden and disabled, including after a background job
+  completes. Fixed inline status-pill wrapping and hidden-form CSS precedence.
+- Validation: all 14 isolated regression tests pass, including batch exclusion,
+  healthy versus sparse-GOP streams, missing files and direct-request rejection;
+  pyright and rendered JavaScript syntax checks pass.

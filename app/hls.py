@@ -798,6 +798,42 @@ def _drop_local_source(
         logger.warning("hls: id=%s could not drop local MP4: %s", video["id"], exc)
 
 
+def stream_actions(videos_dir: Path | str, video: dict[str, Any], app_config: Any = None) -> dict[str, Any]:
+    """Shared eligibility for row controls, POSTs and batch planning."""
+    state = str(video.get("stream_state") or STATE_NONE)
+    tree = stream_dir_for(videos_dir, video)
+    valid = tree is not None and validate_stream(tree, video.get("duration"))[0]
+    repaired = valid and video.get("stream_source") == MODE_REPAIR
+    target = settings(app_config or {})["segment_seconds"]
+    needs_repair = valid and tree is not None and not repaired and longest_segment_seconds(tree) > target * _GOP_BOUND_RATIO
+    busy = state in (STATE_BUILDING, STATE_REPAIRING)
+    if busy:
+        label = "Repairing…" if state == STATE_REPAIRING else "Rebuilding…"
+    elif valid:
+        label = "Ready · repaired" if repaired else ("Rebuilt · needs repair" if needs_repair else "Ready · rebuilt")
+    elif state == STATE_READY:
+        label = "Stream missing · rebuild needed"
+    elif state == STATE_FAILED:
+        label = "Build failed"
+    else:
+        label = "Not built"
+    common = "A stream job is already running." if busy else None
+    if not common and source_path_for(videos_dir, video) is None:
+        common = "No local source; download it from Drive first."
+    rebuild = "The stream is already built and valid." if valid else common
+    repair = ("The stream is already repaired." if repaired else
+              "The stream already has suitable keyframe intervals." if valid and not needs_repair else common)
+    if busy:
+        rebuild = repair = common
+    if app_config is not None:
+        if not can_build(app_config, MODE_COPY):
+            rebuild = rebuild or "Stream builds are unavailable."
+        if not can_build(app_config, MODE_REPAIR):
+            repair = repair or "Stream repair is unavailable."
+    return {"label": label, "rebuild_blocker": rebuild, "repair_blocker": repair,
+            "can_rebuild": rebuild is None, "can_repair": repair is None}
+
+
 def mark_stale(video_id: int, reason: str) -> None:
     """Invalidate a stream after its source was replaced or its tree evicted."""
     db.update_video(video_id, stream_state=STATE_NONE, stream_dir=None)

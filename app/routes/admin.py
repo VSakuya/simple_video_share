@@ -194,7 +194,7 @@ def index() -> str:
 @admin_required
 def videos() -> str:
     """All videos: view, pin (§16.6) or delete."""
-    from .. import batch
+    from .. import batch, hls
 
     # §38: "Cached" has to mean what the home cards already mean - this server
     # holds media for the row, either its MP4 copy or a ready HLS tree. A repaired
@@ -205,6 +205,7 @@ def videos() -> str:
     rows = db.list_all_videos()
     for row in rows:
         row["has_cached_media"] = storage.has_local_media(videos_dir, row)
+        row["stream_actions"] = hls.stream_actions(videos_dir, row, current_app.config)
 
     return render_template(
         "admin_videos.html",
@@ -533,6 +534,10 @@ def _stream_action(video_id: int, mode: str) -> Any:
         flash("Video not found.", "error")
         return redirect(url_for("admin.videos"))
     videos_dir = Path(current_app.config["VIDEOS_DIR"])
+    actions = hls.stream_actions(videos_dir, video, current_app.config)
+    blocker = actions["repair_blocker" if mode == hls.MODE_REPAIR else "rebuild_blocker"]
+    if blocker:
+        return _video_action_answer(False, blocker, video_id=video_id)
     cfg = hls.settings(current_app.config)
     if not cfg["enabled"]:
         flash("HLS is off (hls_enabled = false in config.json).", "error")
@@ -761,8 +766,8 @@ def stream_progress() -> Any:
     jobs = []
     for video in db.list_all_videos():
         job = hls.progress(base, int(video["id"]))
-        if job.get("stage") != "idle":
-            jobs.append(dict(job, video_id=video["id"], stream_state=video.get("stream_state")))
+        jobs.append(dict(job, video_id=video["id"], stream_state=video.get("stream_state"),
+                         actions=hls.stream_actions(base, video, current_app.config)))
     response = jsonify(jobs=jobs)
     response.headers["Cache-Control"] = "no-store"
     return response
