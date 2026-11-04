@@ -2,6 +2,11 @@
   <td>
     {{ u['username'] }}
     {% if u['is_admin'] %}<span class="badge badge--admin">admin</span>{% endif %}
+    {% set owns = [] %}
+    {% if u.get('video_count') %}{% set owns = owns + [u['video_count'] ~ ' video' ~ ('s' if u['video_count'] != 1 else '')] %}{% endif %}
+    {% if u.get('comment_count') %}{% set owns = owns + [u['comment_count'] ~ ' comment' ~ ('s' if u['comment_count'] != 1 else '')] %}{% endif %}
+    {% if u.get('room_count') %}{% set owns = owns + [u['room_count'] ~ ' live room' ~ ('s' if u['room_count'] != 1 else '')] %}{% endif %}
+    {% if owns %}<p class="user-row__owns muted">{{ owns | join(' · ') }}</p>{% endif %}
   </td>
   <td>
     <img class="user-row__avatar"
@@ -15,7 +20,8 @@
   </td>
   <td class="row-actions">
     <form method="post" action="{{ url_for('admin.delete_user', user_id=u['id']) }}"
-          data-async data-async-remove="tr" data-confirm="Delete this user?">
+          data-async data-async-remove="tr"
+          data-confirm="Delete {{ u['username'] }} and everything they own (videos, Drive copies, local cache, comments, live room)? This cannot be undone.">
     {{ csrf_field() }}
       <button type="submit" class="btn btn--danger btn--sm">Delete</button>
     </form>

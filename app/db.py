@@ -50,6 +50,52 @@ def _sql(feature: str, name: str) -> str:
     return cached
 
 
+def _column_is_not_null(conn: sqlite3.Connection, table: str, column: str) -> bool:
+    """True when ``table.column`` exists and is declared NOT NULL.
+
+    ``PRAGMA table_info`` rows are (cid, name, type, notnull, dflt_value, pk),
+    so index 3 is the flag. Used to detect a schema that still needs repairing.
+    """
+    for row in conn.execute("PRAGMA table_info(%s)" % table):
+        if row[1] == column:
+            return bool(row[3])
+    return False
+
+
+def _fk_on_delete(conn: sqlite3.Connection, table: str, column: str) -> Optional[str]:
+    """The ON DELETE action the live schema currently applies to ``column``.
+
+    ``None`` means the column has no foreign key. ``NO ACTION`` is what made a
+    parent row undeletable (§37.2).
+    """
+    for row in conn.execute("PRAGMA foreign_key_list(%s)" % table):
+        if row["from"] == column:
+            return str(row["on_delete"])
+    return None
+
+
+def _rebuild_table(conn: sqlite3.Connection, migration: str) -> None:
+    """Run a table-rebuild migration with FK enforcement suspended, then verify it.
+
+    ``PRAGMA foreign_keys`` is a no-op inside a transaction, so commit before
+    switching it off. The swap is only trusted once ``PRAGMA foreign_key_check``
+    comes back empty: a live database is never left holding dangling references.
+    """
+    conn.commit()
+    conn.execute("PRAGMA foreign_keys = OFF")
+    try:
+        conn.executescript(_sql("migrations", migration))
+        conn.commit()
+        broken = conn.execute("PRAGMA foreign_key_check").fetchall()
+    finally:
+        conn.execute("PRAGMA foreign_keys = ON")
+    if broken:
+        raise RuntimeError(
+            "migration %s left %d dangling FK row(s): %s"
+            % (migration, len(broken), [tuple(r) for r in broken[:3]]),
+        )
+
+
 def _migrate(conn: sqlite3.Connection) -> None:
     """Apply small additive migrations to pre-existing databases (idempotent).
 
@@ -138,6 +184,15 @@ def _migrate(conn: sqlite3.Connection) -> None:
     # DDL script (executescript) upgrades live databases; fresh ones get it
     # from schema.sql.
     conn.executescript(_sql("migrations", "create_notifications"))
+
+    # §37.1/§37.2: two FK shapes that made deleting a user impossible on a
+    # database that had already been used. Both checks read the ACTUAL schema
+    # (PRAGMA) rather than assuming, so an old database gets repaired and a fresh
+    # one - which already has the corrected DDL from sql/schema.sql - is left alone.
+    if _column_is_not_null(conn, "notifications", "actor_id"):
+        _rebuild_table(conn, "notifications_fix_actor_fk")
+    if _fk_on_delete(conn, "live_rooms", "owner_id") != "CASCADE":
+        _rebuild_table(conn, "live_rooms_fix_owner_fk")
 
 
 def init_db() -> None:
@@ -306,11 +361,46 @@ def update_user(user_id: int, **kwargs: Any) -> None:
     conn.close()
 
 
-def delete_user(user_id: int) -> None:
+def user_impact(user_id: int) -> dict[str, int]:
+    """Count what one user owns, for the admin confirm text and the success message.
+
+    Read BEFORE :func:`delete_user`: the cascade removes the child rows, so this is
+    the only moment the numbers still exist - and the only way an admin can see what
+    the destructive button is about to take with it.
+    """
     conn = get_db()
-    conn.execute(_sql("users", "delete"), (user_id,))
-    conn.commit()
+    row = conn.execute(
+        _sql("users", "counts"), (user_id, user_id, user_id, user_id)
+    ).fetchone()
     conn.close()
+    return dict(row) if row else {}
+
+
+def delete_user(user_id: int) -> dict[str, int]:
+    """Delete one user, cascading everything they own. Returns the pre-delete impact.
+
+    The FK actions in ``sql/schema.sql`` do the work: their videos, folders and
+    comments cascade; their live rooms cascade, and the room chat cascades with the
+    room; the notifications addressed to them cascade; the notifications they CAUSED
+    stay in other users' inboxes with ``actor_id`` set to NULL (each row keeps its
+    denormalized actor snapshot, so it still renders). §37.1 and §37.2 fixed the
+    two constraints that used to abort this statement outright.
+
+    Callers must purge the user's FILES first (Drive copies, local cache, stream
+    trees, covers, avatar): once the rows are gone there is nothing left to read the
+    paths from.
+    """
+    impact = user_impact(user_id)
+    conn = get_db()
+    try:
+        conn.execute(_sql("users", "delete"), (user_id,))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    return impact
 
 
 # --- login lockout (anti credential-stuffing) -----------------------------

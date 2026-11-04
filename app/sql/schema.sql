@@ -112,12 +112,16 @@ CREATE INDEX IF NOT EXISTS idx_comments_video ON comments (video_id, id);
 -- (``owner_id``); a user's room shows in the public live list and is managed
 -- from the user's own account page. ``cover_filename`` is stored under the
 -- shared covers directory and served by the home.cover route.
+--
+-- ``owner_id`` cascades (§37.2): an ALTER TABLE-added FK with no ON DELETE
+-- action defaults to NO ACTION, which made every user who owned a live room
+-- undeletable. live_messages already cascades away with its room.
 CREATE TABLE IF NOT EXISTS live_rooms (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     url             TEXT,
     title           TEXT    NOT NULL,
     description     TEXT,
-    owner_id        INTEGER REFERENCES users(id),
+    owner_id        INTEGER REFERENCES users(id) ON DELETE CASCADE,
     cover_filename  TEXT,
     created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
 );
@@ -145,7 +149,10 @@ CREATE INDEX IF NOT EXISTS idx_live_messages_room ON live_messages (room_id, id)
 -- name/avatar and the video title are denormalized snapshots at creation time
 -- (same pattern as live_messages) so a deleted actor or renamed video still
 -- renders. Deleting the recipient or the video cascades the row away (FK);
--- deleting the actor keeps the row (its snapshot keeps it renderable).
+-- deleting the actor keeps the row (its snapshot keeps it renderable) - which is
+-- only possible because ``actor_id`` is nullable. ON DELETE SET NULL against a
+-- NOT NULL column aborts the whole user delete, so do not add NOT NULL back
+-- (§37.1: that is exactly what made the admin Delete button fail).
 -- If a future type (e.g. live) ever needs its own dedicated page, filter this
 -- same table by `type` (query param / small extra route on /notifications)
 -- instead of adding a table.
@@ -153,7 +160,7 @@ CREATE TABLE IF NOT EXISTS notifications (
     id                    INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id               INTEGER NOT NULL,
     type                  TEXT    NOT NULL,
-    actor_id              INTEGER NOT NULL,
+    actor_id              INTEGER,
     actor_username        TEXT,
     actor_avatar_filename TEXT,
     video_id              INTEGER,

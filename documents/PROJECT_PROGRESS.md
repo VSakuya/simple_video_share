@@ -4920,3 +4920,164 @@ the queue starts.
   from the dev `config.json`, no `videos.stream_*` columns exist on the VPS yet, and
   every batch in this section was executed by the 36.4 recorder.
 
+
+## 37. Deleting a user works now: two FK defects, one 500, and the files left behind (Session: 2026-11-04 22:14:07)
+
+### 37.0 The report, and the diagnosis done before writing any code
+
+Report: pressing **Delete** on a user in Admin → Users produced only
+"Something went wrong."
+
+That sentence is `app/static/js/async.js`'s fallback (`j.error || 'Something went
+wrong.'`), and it means exactly one thing: the server answered **non-JSON**, i.e. a 500.
+Measured before any fix was written:
+
+- `app/routes/admin.py::delete_user` called `db.delete_user` with no `try`, so any
+  `sqlite3.IntegrityError` escaped as a Flask 500 HTML page that `async.js` could not
+  parse. Same class of gap as the one 36.1 closed for the Videos table.
+- Two FK shapes in the live schema made that IntegrityError near-certain for a real
+  user. Both were read out of the production database over ssh first
+  (`PRAGMA table_info(notifications)` → `actor_id` notnull = 1;
+  `PRAGMA foreign_key_list(live_rooms)` → `owner_id` → `NO ACTION`), and reproduced
+  minimally (`testing/_fk_check.txt`): `actor delete FAILED: NOT NULL constraint
+  failed: notifications.actor_id`.
+- The VPS counts said who would fail: id=2 VSakuya (1 room, 6 authored notifications),
+  id=3 DD1969 (1 room, 4), id=5 Birdsta (14), id=6 Lyushin (7), id=8 test (2). Only id=1
+  admin and id=7 CTX had nothing blocking them.
+- A third and quieter defect: the cascade removed a user's video **rows** and nothing
+  else. Deleting DD1969 would have dropped 69 rows and left 69 Drive files, MP4 caches,
+  HLS segment trees, covers and an avatar behind, with no row left that could name them.
+
+### 37.1 notifications.actor_id is nullable
+
+`ON DELETE SET NULL` cannot run against a `NOT NULL` column: rather than skipping the
+action, SQLite aborts the whole parent delete. The column is plain `INTEGER` now, and the
+row keeps its denormalized `actor_username` / `actor_avatar_filename` snapshot - which is
+the whole reason those columns exist (§21): another user's inbox still renders
+"Tester commented on ..." after Tester is gone.
+
+- `app/sql/schema.sql` and `app/sql/migrations/create_notifications.sql` carry the
+  corrected DDL, so a fresh database is born right.
+- `app/sql/migrations/notifications_fix_actor_fk.sql` repairs an existing one in place:
+  create `notifications__new`, copy every column explicitly, drop, rename, and recreate
+  `idx_notifications_user` / `idx_notifications_unread` (dropping a table drops its
+  indexes, including the partial one that makes the unread badge cheap).
+- `db._migrate` runs it only when the live schema still reports NOT NULL, so a corrected
+  database is never rebuilt again.
+
+### 37.2 live_rooms.owner_id cascades
+
+`live_rooms_add_owner_id.sql` (§14.8) added `owner_id INTEGER REFERENCES users(id)` with
+no action, and SQLite defaults that to NO ACTION - so every user who owned a live room was
+undeletable, whatever else was clean. Rooms belong to their owner, so the cascade is the
+intent, and `live_messages` already cascaded with its room, so room and chat go together.
+
+- `app/sql/migrations/live_rooms_fix_owner_fk.sql` (same rebuild shape as
+  `live_rooms_drop_code.sql`), detected by `PRAGMA foreign_key_list` rather than assumed.
+- Both rebuilds run through one new helper, `db._rebuild_table`: commit (the pragma is a
+  no-op inside a transaction), `PRAGMA foreign_keys = OFF`, executescript, commit,
+  `PRAGMA foreign_key_check`, `foreign_keys = ON` - and a `RuntimeError` naming the
+  dangling rows if that check is not empty. A live database is never left holding broken
+  references.
+- New schema-reading helpers next to them: `db._column_is_not_null`, `db._fk_on_delete`.
+### 37.3 The route answers instead of crashing
+
+`_video_action_answer` grew into `_action_answer(endpoint, ok, message, **extra)` plus two
+one-line shorthands (`_video_action_answer`, `_user_action_answer`), so the Users table
+gets the 36.1 rule - every refusal fills `error`, so `async.js` toasts the reason instead
+of the fallback text - without redirecting to the Videos page.
+
+`admin.delete_user` now refuses a self-delete and an unknown id with a stated reason,
+purges the user's files, calls `db.delete_user` inside `try / except` with
+`logger.exception` (the traceback lands in `app.log`, where before it never arrived at
+all), and on success reports what went with them:
+
+    Deleted 'DD1969'. 69 videos, 7 comments and 1 live room went with them.
+    Freed 1234.5 MB of local cache.
+
+`_fmt_mb` is reused above 1 MB and kilobytes are printed below it, so a small delete
+cannot report "Freed 0.0 MB" for files that really did go.
+
+`db.delete_user` returns the impact dict it measured **before** the delete
+(`sql/users/counts.sql` via `db.user_impact`) because after the cascade the numbers no
+longer exist anywhere. The same three counts were added to `sql/users/list.sql` and
+`_user_row.html` renders them under the username, so the admin reads "18 videos · 35
+comments · 1 live room" before pressing a button whose confirm text now names what it
+owns and says it cannot be undone.
+
+### 37.4 Files go before rows
+
+`storage.purge_video_files(video, base_dir, covers_dir)` is the one definition of "delete
+a video's files": the Drive copy (lazy `from . import drive`, the same reason
+`is_locally_playable` imports `hls` lazily - storage stays importable on its own), the
+cover, then `drop_local_cache`, which is 35's `_evict` path: MP4 copy, HLS segment tree,
+and the empty `<hash>/` folder pruned once both are gone. `storage.remove_stored_file` is
+the small shared best-effort unlink used for covers, room covers and avatars; both stay
+best effort on purpose, same policy as the evictor, so a locked file never blocks a delete
+the admin already committed to.
+
+- `app/routes/user.py::_purge_video_files` now delegates to it. That closes an older bug
+  nobody had noticed: the owner's own Delete button removed `local_filename` and the
+  cover but left the stream tree, and the folder holding both, on disk.
+- `admin._purge_user_files(user_id)` runs it over `db.list_videos_by_owner`, plus the
+  live room's cover and the user's avatar, **before** `db.delete_user`, for exactly one
+  reason: the cascade is what erases the rows that carry the paths.
+
+### 37.5 Verification (2026-11-04 22:45:01, project venv)
+
+- New probe `testing/probe_admin_user_delete.py`, four isolated cases so a failure names
+  which defect came back: (1) the repaired schema read back from PRAGMA, and the rebuild
+  idempotent - a second `init_db()` moves nothing and leaves no `*__new` table;
+  (2) an actor-only user deleted, and the recipient's notification kept with
+  `actor_id IS NULL` and `actor_username` still readable;
+  (3) a room owner deleted with the room and its chat cascaded;
+  (4) a victim with 3 videos / 2 comments / 1 room / 1 folder deleted through the route,
+  with every file gone - 3 cache folders, 3 covers, 1 room cover, 1 avatar, 3 recorded
+  Drive ids - while the other user, their video and both notifications addressed to them
+  survived, the keeper's video kept (only the comments authored by deleted users left it)
+  and the deleted row gone from the rendered Users table. Then the three refusals
+  (self-delete, unknown id, and a forced `IntegrityError`) each came back as JSON 400
+  with `error` filled. `drive.delete_file` is replaced by a recorder, so no probe here
+  touches Google Drive.
+- Case 5 was added after that first green run, because the delegation in 37.4 had
+  quietly broken the owner's own Delete button while nothing tested it:
+  `routes/user.py` handed `purge_video_files` the videos directory where the helper
+  expects its parent, so `drop_local_cache` looked inside `videos/videos/`, reported
+  0 bytes freed and left the MP4 copy and the whole stream tree on disk - with the
+  DB row still gone, which is all the earlier cases actually check. Put the wrong
+  argument back and the case fails as
+  `the owner kept a cache folder: storage\videos\<hash>`; give it the parent and it
+  passes. No probe before this one had ever posted to
+  `/user/videos/<id>/delete` with real files on disk.
+- `python testing/run_probes.py --timeout 90` - **22/22 probes passed** (re-run
+  after case 5 landed: still 22/22; the count is probe files, and case 5 lives in
+  the same file as 1-4).
+- `python -m pyright app` - 0 errors, 0 warnings; `python -m compileall -q app main.py` clean.
+- Rehearsal against a **copy** of the real dev DB (`testing/_peek_copy.py`, throwaway:
+  `db.DB_PATH` repointed at `storage/data/_copy.db`, file deleted at the end). Before:
+  users 2, videos 8, comments 6, live_rooms 2, notifications 2, folders 1. After the
+  migrations: `actor_id` notnull 0 and `owner_id → CASCADE`. `db.delete_user(22)` -
+  Tester, the exact case that used to abort - and `db.delete_user(2)` - admin, 8 videos +
+  2 rooms - both returned their impact dict and left `PRAGMA foreign_key_check` empty.
+- The dev DB itself (migrated by the probe run) was re-checked afterwards: all 8 videos,
+  6 comments, 2 rooms and both notifications survived the table rebuild,
+  `foreign_key_check` and `integrity_check` both clean, no scratch tables left.
+
+### 37.6 Deferred from this section
+
+- **None of this is deployed.** The VPS still runs the pre-31 code with both broken FK
+  definitions, so production fails the same way until this is pushed and the service
+  restarted. `db.init_db()` repairs 37.1 and 37.2 on the first start after a pull, but
+  a pull ships 31 through 37 together - HLS trees, the hash-folder cache layout,
+  Rebuild all and Repair all - which makes deployment a decision, not a side effect.
+- **Deleting a user who owns videos now deletes their Drive files too.** Purging
+  before the cascade is what the button claims to do, but there is no "unlink the
+  account, keep the videos" mode and no recovery path. The per-user counts in the
+  Users table and the rewritten confirm text are the only warning before it runs.
+- **New orphans only.** What earlier deletes already stranded - Drive copies, cache
+  folders and stream trees that no row points at - is still unreclaimed, so 34.4
+  (~891 MB on this dev box) and the 36.4 deferrals stand unchanged.
+- **`drive.delete_file` has never been exercised end to end.** Every probe in 37.5
+  replaces it with a recorder, so the Drive-side deletion is verified by the arguments
+  it was called with, not by a file actually disappearing from Drive.
+

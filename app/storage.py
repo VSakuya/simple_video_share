@@ -278,6 +278,49 @@ def drop_local_cache(base_dir: str, video: dict) -> int:
     return freed
 
 
+def purge_video_files(video: dict, base_dir: str, covers_dir: str) -> int:
+    """Delete everything one video occupies: Drive copy, cache files, cover.
+
+    The destructive sibling of :func:`drop_local_cache`: the same local removal
+    (MP4 copy, HLS tree, and the folder left empty by a foldered upload) plus the
+    Drive file and the cover image. Used by the owner's Delete button and by the
+    admin user delete, whose FK cascade drops a user's video ROWS and would
+    otherwise strand every one of their files on Drive and on disk (§37.4).
+
+    Best effort, same policy as the upload cleanup and :func:`_evict`: a file that
+    will not go (locked handle, transient Drive error) is logged and does not stop
+    the caller from dropping the row, so the database stays the source of truth.
+
+    Returns the cache bytes freed (0 when the row had no files on disk).
+    """
+    from . import drive  # lazy import: storage stays importable without pydrive2
+
+    drive_id = video.get("google_drive_file_id")
+    if drive_id:
+        try:
+            drive.delete_file(drive_id)
+        except Exception as exc:  # noqa: BLE001 - best-effort cleanup
+            print(f"warn: could not delete Drive file {drive_id}: {exc}", file=sys.stderr)
+
+    remove_stored_file(Path(covers_dir), video.get("cover_filename"), "cover")
+    return drop_local_cache(base_dir, video)
+
+
+def remove_stored_file(dest_dir: Path, filename: Optional[str], label: str) -> None:
+    """Remove one stored image (cover / avatar) by name, best effort.
+
+    Names come from the DB, so a missing file is normal, not an error: it is
+    already consistent with what the row claims. Anything else is logged.
+    """
+    if not filename:
+        return
+    path = Path(dest_dir) / str(filename)
+    try:
+        path.unlink(missing_ok=True)
+    except OSError as exc:  # noqa: BLE001 - the DB row is updated regardless
+        print(f"warn: could not remove {label} {path}: {exc}", file=sys.stderr)
+
+
 def is_locally_playable(videos_dir, video: dict) -> bool:
     """True when a video can be played from this server with no Drive round trip.
 

@@ -304,28 +304,22 @@ def _optional_int(value: str | None) -> int | None:
 
 
 def _purge_video_files(video: dict[str, Any]) -> None:
-    """Best-effort removal of a video's files before dropping its DB row.
+    """Best-effort removal of everything one video occupies, before dropping its row.
 
-    Mirrors the upload flow's cleanup: a failure to remove a file (a locked
-    handle, a transient Drive error) logs a warning and does NOT stop the row
-    from being deleted, so the UI stays consistent. The Drive file is removed
-    first (slowest and most likely to fail), then the local cache and cover.
+    Delegates to :func:`app.storage.purge_video_files` so this path and the admin
+    user delete can never disagree about what "deleting a video" means on disk.
+    §37.4 closed the gap this used to have: it removed the MP4 copy and the cover
+    but left the HLS segment tree - and the folder holding both - behind as an
+    orphan that no list could account for.
     """
-    drive_id = video.get("google_drive_file_id")
-    if drive_id:
-        try:
-            drive.delete_file(drive_id)
-        except Exception as exc:  # noqa: BLE001 - best-effort cleanup
-            logger.warning("purge: could not delete Drive file %s: %s", drive_id, exc)
-
-    videos_dir = str(current_app.config["VIDEOS_DIR"])
-    covers_dir = str(current_app.config["COVERS_DIR"])
-    local = video.get("local_filename")
-    if local:
-        _unlink(Path(videos_dir) / local)
-    cover = video.get("cover_filename")
-    if cover:
-        _unlink(Path(covers_dir) / cover)
+    # ``base_dir`` is the storage directory - the parent of videos/ - the same
+    # convention drop_local_cache and _evict work from. Pointing it at videos/
+    # itself would make the helper look in videos/videos/ and free nothing.
+    storage.purge_video_files(
+        video,
+        str(Path(current_app.config["VIDEOS_DIR"]).parent),
+        str(current_app.config["COVERS_DIR"]),
+    )
 
 
 def _unlink(path: Path) -> None:

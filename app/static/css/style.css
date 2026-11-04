@@ -1107,6 +1107,8 @@ button:disabled { opacity: 0.55; cursor: not-allowed; filter: none; }
 /* Admin user list: small circular avatar + a truncated password-hash preview. */
 .user-row__avatar { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; display: block; }
 .user-row__hash { font-size: 0.72rem; }
+/* Admin Users table: what the Delete button would take with it (§37.3). */
+.user-row__owns { display: flex; flex-wrap: wrap; gap: 8px; margin: 2px 0 0; font-size: 0.75rem; }
 
 /* My-videos status column: a compact progress bar while a Drive upload runs. */
 .status-cell { min-width: 168px; }

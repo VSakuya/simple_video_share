@@ -4,13 +4,15 @@
 -- name/avatar and the video title are denormalized snapshots at creation time
 -- (same pattern as live_messages) so a deleted actor or renamed video still
 -- renders. Deleting the recipient or the video cascades the row away; deleting
--- the actor keeps the row (snapshot stays renderable).
+-- the actor keeps the row (snapshot stays renderable) - possible only because
+-- actor_id is nullable (see notifications_fix_actor_fk.sql, §37.1: the original
+-- NOT NULL made ON DELETE SET NULL abort every user delete).
 
 CREATE TABLE IF NOT EXISTS notifications (
     id                    INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id               INTEGER NOT NULL,
     type                  TEXT    NOT NULL,
-    actor_id              INTEGER NOT NULL,
+    actor_id              INTEGER,
     actor_username        TEXT,
     actor_avatar_filename TEXT,
     video_id              INTEGER,

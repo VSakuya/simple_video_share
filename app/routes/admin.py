@@ -70,8 +70,8 @@ def _is_ajax() -> bool:
     return request.headers.get("X-Requested-With") == "XMLHttpRequest"
 
 
-def _video_action_answer(ok: bool, message: str, **extra: Any) -> Any:
-    """Answer one Videos-table action both ways (16.1).
+def _action_answer(endpoint: str, ok: bool, message: str, **extra: Any) -> Any:
+    """Answer one admin-table action both ways (16.1).
 
     ``data-async`` forms get JSON so the table row updates in place; a plain form
     (or a browser without async.js) gets the flash + redirect every other admin
@@ -83,12 +83,27 @@ def _video_action_answer(ok: bool, message: str, **extra: Any) -> Any:
         if not ok:
             # async.js toasts ``error`` (its fallback text is the generic "Something
             # went wrong"), so a refusal that only fills message reaches the admin as
-            # that line instead of as a reason.
+            # that line instead of as a reason. Every refusal in this blueprint goes
+            # through here so none of them can regress to that text (§36.1, §37.3).
             payload["error"] = message
         payload.update(extra)
         return (jsonify(payload), 200 if ok else 400)
     flash(message, "success" if ok else "error")
-    return redirect(url_for("admin.videos"))
+    return redirect(url_for(endpoint))
+
+
+def _video_action_answer(ok: bool, message: str, **extra: Any) -> Any:
+    """Videos-table shorthand for :func:`_action_answer`."""
+    return _action_answer("admin.videos", ok, message, **extra)
+
+
+def _user_action_answer(ok: bool, message: str, **extra: Any) -> Any:
+    """Users-table shorthand for :func:`_action_answer` (§37.3).
+
+    The user delete used to answer only with flash + redirect and let the DB error
+    escape as a 500, which is why the page said "Something went wrong".
+    """
+    return _action_answer("admin.users", ok, message, **extra)
 
 
 def _fmt_mb(n: int) -> str:
@@ -359,18 +374,96 @@ def create_user() -> Any:
 @admin_bp.route("/users/<int:user_id>/delete", methods=["POST"])
 @admin_required
 def delete_user(user_id: int) -> Any:
-    """Admin deletes a user. Self-deletion is not allowed."""
+    """Admin deletes a user, everything they own, and every file their videos occupy.
+
+    Files are purged BEFORE the row is dropped: the FK cascade (§37.1/§37.2) is
+    what removes their video rows, and after it nothing is left to read the Drive
+    ids, cache paths, stream trees and covers from. Skipping that step is how a user
+    delete used to strand whole folders of cache on disk (§37.4). The avatar goes too.
+
+    The cascade itself is now answered instead of crashing: an IntegrityError here
+    used to escape as a 500 and reach the admin as "Something went wrong".
+    """
     me = current_user()
     if me is not None and user_id == me["id"]:
-        if _is_ajax():
-            return jsonify(ok=False, error="You cannot delete your own account."), 400
-        flash("You cannot delete your own account.", "error")
-        return redirect(url_for("admin.users"))
-    db.delete_user(user_id)
-    if _is_ajax():
-        return jsonify(ok=True, message="User deleted.", user_id=user_id)
-    flash("User deleted.", "success")
-    return redirect(url_for("admin.users"))
+        return _user_action_answer(False, "You cannot delete your own account.")
+    user = db.get_user_by_id(user_id)
+    if user is None:
+        return _user_action_answer(False, "User not found.")
+
+    impact = db.user_impact(user_id)
+    freed = _purge_user_files(user_id)
+    try:
+        db.delete_user(user_id)
+    except Exception as exc:  # noqa: BLE001 - a failed cascade must not be a mystery
+        logger.exception("admin: deleting user %s failed", user_id)
+        return _user_action_answer(
+            False,
+            "Delete failed in the database: %s. Their files were already removed, so"
+            " the rows may need a retry." % (exc,),
+        )
+    message = "Deleted '%s'." % user["username"]
+    owned = _impact_text(impact)
+    if owned:
+        message += " " + owned
+    if freed:
+        # The Videos table speaks in MB; a small user delete should not round to
+        # "0.0 MB" when it really gave back a few hundred kilobytes.
+        size = _fmt_mb(freed) if freed >= 1048576 else "%d KB" % (freed // 1024)
+        message += " Freed %s of local cache." % size
+    logger.info("admin: %s", message)
+    return _user_action_answer(True, message, user_id=user_id)
+
+
+def _purge_user_files(user_id: int) -> int:
+    """Delete every file one user owns on Drive and on disk. Returns cache bytes freed.
+
+    Runs before :func:`db.delete_user` for the reason stated there. Covers owned by
+    their live room and their avatar are included; a file that will not go is logged
+    by the storage helper and never blocks the delete, same policy as the cache
+    evictor.
+    """
+    videos_dir = Path(current_app.config["VIDEOS_DIR"])
+    covers_dir = str(current_app.config["COVERS_DIR"])
+    freed = 0
+    for video in db.list_videos_by_owner(user_id):
+        freed += storage.purge_video_files(video, str(videos_dir.parent), covers_dir)
+    room = db.get_live_room_by_owner(user_id)
+    if room is not None:
+        storage.remove_stored_file(Path(covers_dir), room.get("cover_filename"), "room cover")
+    owner = db.get_user_by_id(user_id)
+    if owner is not None:
+        storage.remove_stored_file(
+            Path(current_app.config["AVATARS_DIR"]),
+            owner.get("avatar_filename"),
+            "avatar",
+        )
+    return freed
+
+
+def _impact_text(impact: dict[str, int]) -> str:
+    """'69 videos, 7 comments and 1 live room went with them.' - or "" for an empty user.
+
+    Same numbers the Users table shows next to the name, so what the admin was
+    warned about and what actually happened are the same sentence.
+    """
+    parts: list[str] = []
+    for key, label in (
+        ("video_count", "video"),
+        ("comment_count", "comment"),
+        ("room_count", "live room"),
+        ("folder_count", "folder"),
+    ):
+        count = int(impact.get(key) or 0)
+        if count:
+            parts.append("%d %s%s" % (count, label, "s" if count != 1 else ""))
+    if not parts:
+        return ""
+    if len(parts) == 1:
+        joined = parts[0]
+    else:
+        joined = ", ".join(parts[:-1]) + " and " + parts[-1]
+    return "%s went with them." % joined
 
 
 @admin_bp.route("/logs/data")
