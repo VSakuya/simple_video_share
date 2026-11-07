@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Manage services — Simple Video Share{% endblock %}
+{% macro fields(service=none) %}
+<div class="settings-grid">
+  <div class="field"><label>Service name<input name="name" required maxlength="80" value="{{ service.name if service else '' }}" placeholder="Tavern"></label></div>
+  <div class="field"><label>Identifier (English)<input name="slug" required maxlength="40" pattern="[a-z]([a-z0-9-]*[a-z0-9])?" value="{{ service.slug if service else '' }}" placeholder="traven"></label></div>
+  <div class="field"><label>Service address<input name="address" required value="{{ service.upstream ~ service.entry_path if service else '' }}" placeholder="http://127.0.0.1:8000/"></label></div>
+</div>
+<label><input type="checkbox" name="enabled" value="1" {% if not service or service.enabled %}checked{% endif %}> Enabled</label>
+{% endmacro %}
+{% block content %}
+<div class="page">
+  <h1>Custom services</h1>
+  {% include "_admin_nav.html" %}
+  <p class="muted">Only website users can access enabled services. Add trusted services only. Full entry URLs, including paths and fragments, are supported.</p>
+  <section class="panel">
+    <h2>Add service</h2>
+    <form method="post">{{ csrf_field() }}{{ fields() }}<button class="btn" type="submit">Add service</button></form>
+  </section>
+  {% for service in services %}
+  <section class="panel">
+    <h2>{{ service.name }}</h2>
+    <p><a href="{{ url_for('services.view', slug=service.slug) }}">/services/{{ service.slug }}/</a>{% if not service.enabled %} · Disabled{% endif %}</p>
+    <form method="post">
+      {{ csrf_field() }}<input type="hidden" name="original_slug" value="{{ service.slug }}">
+      {{ fields(service) }}<button class="btn" type="submit">Save changes</button>
+    </form>
+    <form method="post" data-confirm="Delete this service and revoke access?">
+      {{ csrf_field() }}<input type="hidden" name="original_slug" value="{{ service.slug }}"><input type="hidden" name="action" value="delete">
+      <button class="btn btn--danger" type="submit">Delete</button>
+    </form>
+  </section>
+  {% endfor %}
+</div>
+{% endblock %}

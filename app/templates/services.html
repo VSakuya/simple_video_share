@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Custom services — Simple Video Share{% endblock %}
+{% block content %}
+<div class="page">
+  <h1>Custom services</h1>
+  {% if user_is_admin %}<p><a class="btn btn--ghost" href="{{ url_for('admin_services.manage') }}">Manage services</a></p>{% endif %}
+  <div class="admin-hub">
+    {% for service in services %}
+    <a class="admin-hub__card" href="{{ url_for('services.view', slug=service.slug) }}">
+      <span class="admin-hub__count admin-hub__count--text">{{ service.name }}</span>
+      <span class="admin-hub__label">Open service →</span>
+    </a>
+    {% else %}<p class="muted">No services available.</p>{% endfor %}
+  </div>
+</div>
+{% endblock %}

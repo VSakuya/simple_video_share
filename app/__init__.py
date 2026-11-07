@@ -98,6 +98,8 @@ def create_app() -> Flask:
     if base_path and not base_path.startswith("/"):
         base_path = "/" + base_path
     app.config["BASE_PATH"] = base_path
+    for key in ("services_origin_template", "services_parent_origin"):
+        app.config[key] = cfg[key]
 
     # Cache-busting version for shared and live-player scripts plus style.css.
     # A content hash computed once at startup lets a browser
@@ -173,6 +175,7 @@ def create_app() -> Flask:
     from .routes.user import user_bp
     from .routes.admin import admin_bp
     from .routes.notify import notify_bp, notify_page_bp
+    from .routes.services import services_bp, admin_services_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(home_bp)
@@ -184,6 +187,8 @@ def create_app() -> Flask:
     app.register_blueprint(admin_bp)
     app.register_blueprint(notify_bp)
     app.register_blueprint(notify_page_bp)
+    app.register_blueprint(services_bp)
+    app.register_blueprint(admin_services_bp)
     app_logger.info("create_app: ready (%d blueprints registered)", len(app.blueprints))
 
     @app.template_filter("human_size")

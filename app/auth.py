@@ -118,6 +118,9 @@ def login() -> Any:
             return redirect(url_for("auth.login", next=next_url))
 
         # 3. Success — clear failures, record last login, then apply the forced-change redirect.
+        from .services import revoke_login
+        revoke_login(session.get("service_login_key"))
+        session.pop("service_login_key", None)
         db.clear_failed_logins(username)
         db.update_user(
             user["id"],
@@ -174,6 +177,8 @@ def change_password() -> Any:
 
 @auth_bp.route("/logout")
 def logout() -> Any:
+    from .services import revoke_login
+    revoke_login(session.get("service_login_key"))
     session.clear()
     flash("Logged out.", "info")
     return redirect(url_for("auth.login"))

@@ -175,3 +175,23 @@ CREATE TABLE IF NOT EXISTS notifications (
 );
 CREATE INDEX IF NOT EXISTS idx_notifications_user   ON notifications (user_id, id);
 CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications (user_id) WHERE read_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS custom_services (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    slug TEXT NOT NULL UNIQUE,
+    upstream TEXT NOT NULL,
+    entry_path TEXT NOT NULL DEFAULT '/',
+    enabled INTEGER NOT NULL DEFAULT 1
+);
+-- Opaque, hashed credentials; one login can open several service origins.
+CREATE TABLE IF NOT EXISTS service_grants (
+    token_hash TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    service_id INTEGER NOT NULL REFERENCES custom_services(id) ON DELETE CASCADE,
+    login_key TEXT NOT NULL,
+    password_stamp TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    expires_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_service_grants_login ON service_grants(login_key);

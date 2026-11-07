@@ -5,6 +5,10 @@
   <h1>Admin</h1>
   <p class="muted">Pick a section to manage. Counts refresh on every visit.</p>
   <div class="admin-hub">
+    <a class="admin-hub__card" href="{{ url_for('admin_services.manage') }}">
+      <span class="admin-hub__count admin-hub__count--text">Services</span>
+      <span class="admin-hub__label">Custom services</span>
+    </a>
     <a class="admin-hub__card" href="{{ url_for('admin.videos') }}">
       <span class="admin-hub__count">{{ video_count }}</span>
       <span class="admin-hub__label">Videos</span>

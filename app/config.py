@@ -22,6 +22,11 @@ DEFAULTS: dict[str, Any] = {
     "drive_folder_id": "",
     "secret_key": "",
     "debug": False,
+    # Each service gets its own origin; root-relative upstream URLs remain valid.
+    "services_origin_template": "http://{slug}.video.localhost:8090",
+    "services_parent_origin": "http://video.localhost:8080",
+    "services_gateway_host": "127.0.0.1",
+    "services_gateway_port": 8090,
     # Subpath the app is mounted under when behind a reverse proxy (e.g. "/video").
     # Empty string means "serve from the domain root" (local development).
     "base_path": "",

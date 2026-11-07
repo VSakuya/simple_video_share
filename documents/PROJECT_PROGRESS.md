@@ -1,5 +1,36 @@
 # Project Requirements — Simple Video Share
 
+## 39. Custom services (registered 2026-11-08 03:04:04)
+
+### 39.1 Change Log (2026-11-08 03:10:23)
+
+| Change | Reason | Blast radius / review |
+| --- | --- | --- |
+| Add administrator-managed named services and a signed-in-user sidebar/list/iframe launcher | User requested local implementation before deployment | New SQLite tables, service routes/templates, one sidebar item and admin card; existing video behavior preserved |
+| Add isolated host-based HTTP/stream/WebSocket gateway with one-time handoff and revocation | Preserve upstream root paths without editing hosted apps; protect every request | One pinned aiohttp dependency and separate gateway process; no public DNS, certificates or deployment changes |
+| Verify the LAN media service at its full /web/#/home entry | User supplied this target for local acceptance | Local-only configuration, HTTP access checks and browser review; upstream account login remains separate |
+| Add isolated regression tests and operating documentation | Verify login boundaries, request fidelity and connection revocation | Tests use temporary databases and loopback upstreams; local preview uses existing app data only for configured services |
+
+Review: scope matches the user's authorized local-only implementation. This entry
+was registered retrospectively after discovering `.codex/AGENTS.md` during the
+initial implementation; remaining integration, browser checks and fixes follow it.
+
+Implemented all four items above. Added CRUD/enable controls, service list and
+iframe view, a separate host-routed asynchronous gateway and revocable grants.
+Local `main.py` starts both processes; production WSGI startup stays unchanged.
+Operating and future deployment instructions are in `CUSTOM_SERVICES.md`.
+
+Verification: all 9 new isolated integration tests and 21 existing Python
+regression tests pass; `python -m pyright app` reports zero errors/warnings.
+Browser review verified service management edits, the supplied Jellyfin entry,
+static assets/API loading, the authenticated home page, expansion/collapse without
+iframe recreation, website logout and direct-access denial afterward. Browser
+review exposed two issues that were fixed: a no-referrer handoff lost the Origin
+header, and moving an iframe for expansion discarded its browsing context.
+Screenshot: `storage/services-preview.png`. The temporary preview administrator
+was removed after logout. The configured `media` service remains for owner review
+at `http://video.localhost:8080/services/media/`. No deployment was performed.
+
 > All code, identifiers, comments, and UI strings MUST be written in **English only**.
 > This document is the single source of truth for the design and is meant to be re-checked
 > during later implementation passes.

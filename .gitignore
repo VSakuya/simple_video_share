@@ -38,6 +38,7 @@ credentials/*
 # Runtime data (videos, covers, avatars, SQLite DB)
 storage/
 testing/*
+!testing/test_services.py
 HANDOFF_mediabunny.md
 *.conf
 # Everything under documents/ is local working notes EXCEPT the requirements /

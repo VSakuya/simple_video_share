@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}{{ service.name }} — Simple Video Share{% endblock %}
+{% block content %}
+<div class="page service-page">
+  <div class="service-toolbar">
+    <a href="{{ url_for('services.index') }}">← Custom services</a>
+    <h1>{{ service.name }}</h1>
+    <button type="submit" form="service-launch" class="btn btn--ghost">Reload</button>
+    <button type="button" class="btn btn--ghost" id="service-expand" aria-expanded="false">Expand</button>
+  </div>
+  <form id="service-launch" method="post" action="{{ url_for('services.launch', slug=service.slug) }}" target="custom-service-frame">{{ csrf_field() }}</form>
+  <iframe id="service-frame" name="custom-service-frame" title="{{ service.name }}" class="service-frame" referrerpolicy="no-referrer" allow="fullscreen; autoplay; clipboard-write" allowfullscreen></iframe>
+  <p class="muted">If the service is unavailable, check its connection and try Reload.</p>
+</div>
+<script>
+  document.getElementById('service-launch').submit();
+  (function () {
+    var page = document.querySelector('.service-page');
+    var button = document.getElementById('service-expand');
+    function expand(active) {
+      page.classList.toggle('is-expanded', active);
+      button.textContent = active ? 'Collapse' : 'Expand';
+      button.setAttribute('aria-expanded', String(active));
+    }
+    button.addEventListener('click', function () { expand(!page.classList.contains('is-expanded')); });
+    document.addEventListener('keydown', function (event) { if (event.key === 'Escape') expand(false); });
+  })();
+</script>
+{% endblock %}
