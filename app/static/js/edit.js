@@ -5,9 +5,9 @@
 //      (WebCodecs) when available, else an HTML5 <video> element.
 //   2. Direct pass when there is no clip and all caps are already met;
 //      otherwise transcode:
-//        Stage 1 — mediabunny (WebCodecs, hardware-accelerated, AV1 then
+//        Stage 1 — mediabunny (WebCodecs, hardware-accelerated,
 //          H.264; caps: 1080p / 60fps / admin bitrate).
-//        Stage 2 — ffmpeg.wasm (software): AV1 (libsvtav1) then H.264
+//        Stage 2 — ffmpeg.wasm (software): H.264
 //          (libx264), audio copy first, AAC re-encode if the copy fails.
 //      A required transcode that fails on every engine BLOCKS the upload
 //      (no silent pass-through of a non-compliant original, §13.13).
@@ -54,8 +54,8 @@ function getMaxBitrate() {
   return Math.min(MAX_BITRATE_KBPS, n);
 }
 // WebCodecs codec ids, in priority order, used by the mediabunny path.
-// "av1" and "avc" are the ids mediabunny's capability checks understand.
-const WEBCODECS_CODEC_PRIORITY = ["av1", "avc"];
+// "avc" is mediabunny's id for H.264.
+const WEBCODECS_CODEC_PRIORITY = ["avc"];
 // Same-origin vendored build (app/static/js/vendor) — no CDN, no CORS.
 // Cache-bust: the import() response is cached in the browser HTTP cache, and early
 // clients cached this URL with a wrong (text/plain) MIME type, which permanently
@@ -99,12 +99,16 @@ const maxBitrateInput = $("max-bitrate-input");
 if (maxBitrateInput) {
   try {
     const saved = parseInt(localStorage.getItem("svs-max-bitrate"), 10);
-    if (Number.isFinite(saved) && saved > 0) {
+    const savedAdminMax = Number(localStorage.getItem("svs-max-bitrate-admin"));
+    if (savedAdminMax === MAX_BITRATE_KBPS && Number.isFinite(saved) && saved > 0) {
       maxBitrateInput.value = Math.min(MAX_BITRATE_KBPS, saved);
     }
   } catch (e) { /* localStorage unavailable (e.g. private mode) */ }
   maxBitrateInput.addEventListener("change", () => {
-    try { localStorage.setItem("svs-max-bitrate", maxBitrateInput.value); } catch (e) { /* ignore */ }
+    try {
+      localStorage.setItem("svs-max-bitrate", maxBitrateInput.value);
+      localStorage.setItem("svs-max-bitrate-admin", String(MAX_BITRATE_KBPS));
+    } catch (e) { /* ignore */ }
   });
 }
 
@@ -229,7 +233,12 @@ dropZone.addEventListener("drop", (e) => {
 });
 
 coverInput.addEventListener("change", onCoverSelected);
-window.addEventListener("beforeunload", () => {
+window.addEventListener("beforeunload", (event) => {
+  if (!processing && activeUploadRetries === 0) return;
+  event.preventDefault();
+  event.returnValue = "";
+});
+window.addEventListener("pagehide", () => {
   cancelActiveTranscode();
   if (videoUrl) {
     URL.revokeObjectURL(videoUrl);
@@ -332,6 +341,7 @@ async function resolveFolder() {
 }
 
 let processing = false; // guards against double-submit while the pipeline runs
+let activeUploadRetries = 0;
 let retryUploadHandler = null;
 
 function ensureRetryButton() {
@@ -346,17 +356,21 @@ function ensureRetryButton() {
     if (!retryUploadHandler) return;
     btn.disabled = true;
     btn.textContent = "Retrying…";
+    activeUploadRetries++;
     try {
       await retryUploadHandler();
       retryUploadHandler = null;
       btn.classList.add("hidden");
       btn.disabled = false;
       btn.textContent = "Retry upload";
+      showSuccess();
     } catch (err) {
       const msg = err && err.message ? err.message : String(err);
       clientLog("error", "Retry upload failed: " + msg);
       btn.disabled = false;
       btn.textContent = "Retry upload";
+    } finally {
+      activeUploadRetries--;
     }
   });
   const panel = $("progress-panel");
@@ -415,6 +429,7 @@ function onUpload() {
         await segmentedUpload();
       }
       clientLog("info", "Upload complete - showing success screen");
+      processing = false;
       showSuccess(); // overlay + 3 s countdown to My Videos (§13.18)
     } catch (err) {
       cancelActiveTranscode(); // abort any in-flight conversion, reset its state
@@ -507,7 +522,7 @@ async function mediabunnyUnavailableReason() {
   for (const codec of WEBCODECS_CODEC_PRIORITY) {
     if (await mb.canEncode(codec).catch(() => false)) return null;
   }
-  return "this browser can encode neither AV1 nor H.264";
+  return "this browser cannot encode H.264";
 }
 
 // Input-format instances only exist once mediabunny is loaded, so build the
@@ -577,6 +592,7 @@ async function probeWithMediabunny(file) {
     const fr = await vt.computeFrameRateMetrics();
     return {
       duration,
+      codec: await vt.getCodec(),
       width: vt.displayWidth, // already accounts for rotation (not codedWidth)
       height: vt.displayHeight,
       fps: fr.bestGuessFrameRate || fr.averageFrameRate || 0,
@@ -625,6 +641,7 @@ function clipRange() {
 function needsTranscode() {
   if (clipRange()) return true;
   if (!probeInfo) return true; // unknown caps -> transcode to be safe
+  if (probeInfo.codec !== "avc") return true;
   if (probeInfo.height > MAX_HEIGHT) return true;
   if (probeInfo.fps > getMaxFps()) return true;
   if (probeInfo.bitrateKbps > getMaxBitrate()) return true;
@@ -665,7 +682,7 @@ async function processVideo() {
       "; caps: height<=1080, fps<=60, bitrate<=" + getMaxBitrate() + " kbps)."
   );
 
-  // Stage 1 - mediabunny (WebCodecs, hardware accelerated), AV1 then H.264.
+  // Stage 1 - mediabunny (WebCodecs, hardware accelerated), H.264.
   // `mediabunnyUnavailableReason()` returns null when it can run, otherwise
   // the reason we must fall back to ffmpeg.wasm.
   const reason = await mediabunnyUnavailableReason();
@@ -703,11 +720,9 @@ async function processVideo() {
   }
 
   // Stage 2 - ffmpeg.wasm (CPU). Works in any context (no secure-context /
-  // WebCodecs requirement). AV1 (libsvtav1) then H.264 (libx264); audio is
+  // WebCodecs requirement). H.264 (libx264); audio is
   // copied first and re-encoded to AAC if the copy is not MP4-compatible.
   const ffmpegAttempts = [
-    { encoder: "libsvtav1", audio: "copy" },
-    { encoder: "libsvtav1", audio: "aac" },
     { encoder: "libx264", audio: "copy" },
     { encoder: "libx264", audio: "aac" },
   ];

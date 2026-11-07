@@ -80,6 +80,7 @@ function getMaxBitrate() {
 // --- Queue state ---
 let queue = []; // { file, title, sizeMB, status, statusEl }
 let processing = false;
+let activeUploadRetries = 0;
 
 function updateCount() {
   queueCount.textContent = queue.length ? "(" + queue.length + ")" : "";
@@ -141,6 +142,7 @@ async function retryQueuedItem(item) {
   btn.disabled = true;
   btn.textContent = "Retrying…";
   setItemStatus(item, "Retrying upload…");
+  activeUploadRetries++;
   try {
     await uploadVideo(item.uploadState.blob, item.uploadState.meta, ctx);
     item.uploadState = null;
@@ -152,6 +154,8 @@ async function retryQueuedItem(item) {
     log("error", item.title + " retry failed: " + msg);
     btn.disabled = false;
     btn.textContent = "Retry";
+  } finally {
+    activeUploadRetries--;
   }
 }
 
@@ -341,14 +345,25 @@ if (maxBitrateInput) {
     const saved = parseInt(localStorage.getItem("svs-max-bitrate"), 10);
     const max = (typeof window.SVS_MAX_BITRATE_KBPS === "number" && window.SVS_MAX_BITRATE_KBPS > 0)
       ? window.SVS_MAX_BITRATE_KBPS : 5000;
-    if (Number.isFinite(saved) && saved > 0) maxBitrateInput.value = Math.min(max, saved);
+    const savedAdminMax = Number(localStorage.getItem("svs-max-bitrate-admin"));
+    if (savedAdminMax === max && Number.isFinite(saved) && saved > 0) maxBitrateInput.value = Math.min(max, saved);
   } catch (e) { /* localStorage unavailable (e.g. private mode) */ }
   maxBitrateInput.addEventListener("change", () => {
-    try { localStorage.setItem("svs-max-bitrate", maxBitrateInput.value); } catch (e) { /* ignore */ }
+    try {
+      localStorage.setItem("svs-max-bitrate", maxBitrateInput.value);
+      const max = (typeof window.SVS_MAX_BITRATE_KBPS === "number" && window.SVS_MAX_BITRATE_KBPS > 0)
+        ? window.SVS_MAX_BITRATE_KBPS : 5000;
+      localStorage.setItem("svs-max-bitrate-admin", String(max));
+    } catch (e) { /* ignore */ }
   });
 }
 startBtn.addEventListener("click", () => { void startQueue(); });
-window.addEventListener("beforeunload", () => cancelActiveTranscode());
+window.addEventListener("beforeunload", (event) => {
+  if (!processing && activeUploadRetries === 0) return;
+  event.preventDefault();
+  event.returnValue = "";
+});
+window.addEventListener("pagehide", () => cancelActiveTranscode());
 
 const logClearBtn = $("log-clear");
 if (logClearBtn) logClearBtn.addEventListener("click", () => { logConsole.innerHTML = ""; });

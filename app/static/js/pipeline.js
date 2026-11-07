@@ -15,9 +15,9 @@
 //   }
 //
 // Transcode engines (in priority order):
-//   Stage 1 — mediabunny (WebCodecs, hardware-accelerated): AV1 then H.264.
+//   Stage 1 — mediabunny (WebCodecs, hardware-accelerated): H.264.
 //             Requires a secure context (HTTPS or localhost).
-//   Stage 2 — ffmpeg.wasm (software): AV1 (libsvtav1) then H.264 (libx264),
+//   Stage 2 — ffmpeg.wasm (software): H.264 (libx264),
 //             audio copy first, AAC re-encode if the copy fails.
 //   If a transcode is REQUIRED (caps not met or clip selected) and every
 //   engine fails, the upload is BLOCKED — the original file is never passed
@@ -45,7 +45,7 @@ export const MAX_BITRATE_KBPS = (() => {
   return Number.isFinite(n) && n > 0 ? n : 5000;
 })();
 // WebCodecs codec ids, in priority order, used by the mediabunny path.
-const WEBCODECS_CODEC_PRIORITY = ["av1", "avc"];
+const WEBCODECS_CODEC_PRIORITY = ["avc"];
 // Same-origin vendored build (app/static/js/vendor) — no CDN, no CORS.
 const MEDIABUNNY_BUNDLE = "./vendor/mediabunny.min.mjs?v=2";
 
@@ -146,7 +146,7 @@ export async function mediabunnyUnavailableReason() {
   for (const codec of WEBCODECS_CODEC_PRIORITY) {
     if (await mb.canEncode(codec).catch(() => false)) return null;
   }
-  return "this browser can encode neither AV1 nor H.264";
+  return "this browser cannot encode H.264";
 }
 
 // Input-format instances only exist once mediabunny is loaded, so build the
@@ -213,6 +213,7 @@ async function probeWithMediabunny(file) {
     const fr = await vt.computeFrameRateMetrics();
     return {
       duration,
+      codec: await vt.getCodec(),
       width: vt.displayWidth, // already accounts for rotation (not codedWidth)
       height: vt.displayHeight,
       fps: fr.bestGuessFrameRate || fr.averageFrameRate || 0,
@@ -270,6 +271,7 @@ export async function processVideo(file, opts, ctx) {
   const probe = opts.probe;
   let needs = !!opts.clip;
   if (!probe) needs = true; // unknown caps -> transcode to be safe
+  else if (probe.codec !== "avc") needs = true;
   else if (probe.height > MAX_HEIGHT) needs = true;
   else if (probe.fps > opts.maxFps) needs = true;
   else if (probe.bitrateKbps > capBitrate) needs = true;
@@ -296,7 +298,7 @@ export async function processVideo(file, opts, ctx) {
       "; caps: height<=1080, fps<=60, bitrate<=" + capBitrate + " kbps)."
   );
 
-  // Stage 1 - mediabunny (WebCodecs, hardware accelerated), AV1 then H.264.
+  // Stage 1 - mediabunny (WebCodecs, hardware accelerated), H.264.
   const reason = await mediabunnyUnavailableReason();
   if (reason === null) {
     const mb = await loadMediabunny();
@@ -324,11 +326,9 @@ export async function processVideo(file, opts, ctx) {
     log("warn", "mediabunny unavailable: " + reason + " - falling back to ffmpeg.wasm.");
   }
 
-  // Stage 2 - ffmpeg.wasm (software): AV1 (libsvtav1) then H.264 (libx264);
+  // Stage 2 - ffmpeg.wasm (software): H.264 (libx264);
   // audio is copied first and re-encoded to AAC if the copy is not MP4-compatible.
   const ffmpegAttempts = [
-    { encoder: "libsvtav1", audio: "copy" },
-    { encoder: "libsvtav1", audio: "aac" },
     { encoder: "libx264", audio: "copy" },
     { encoder: "libx264", audio: "aac" },
   ];
@@ -350,7 +350,7 @@ export async function processVideo(file, opts, ctx) {
   // A required transcode could not run - BLOCK the upload (never pass a
   // non-compliant original through).
   const why = reason !== null
-    ? "mediabunny unavailable (" + reason + ") and ffmpeg.wasm failed for all 4 encoder/audio combinations"
+    ? "mediabunny unavailable (" + reason + ") and ffmpeg.wasm failed for both H.264 audio combinations"
     : "mediabunny and ffmpeg.wasm both failed for all codec/encoder attempts";
   throw new Error(why);
 }
