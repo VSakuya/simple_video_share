@@ -24,8 +24,8 @@ import { FFmpeg } from "./ffmpeg/lib/index.js";
 // e.g. /video as well as at the root.
 const SVS_BASE = (typeof window !== "undefined" && window.SVS_BASE) ? window.SVS_BASE : "";
 
-const SEGMENT_THRESHOLD = 256 * 1024 * 1024; // prefer segmented upload above 256 MB
 const SEGMENT_SIZE = 64 * 1024 * 1024; // 64 MB per part; keeps each multipart upload below proxy limits
+const SEGMENT_THRESHOLD = SEGMENT_SIZE; // any file larger than one part is segmented
 const SEGMENT_RETRY_MAX = 3;
 const SEGMENT_RETRY_BASE_MS = 1200;
 const MAX_HEIGHT = 1080;
@@ -1178,9 +1178,11 @@ function xhrPost(url, body, onProgress) {
       let j = null;
       try { j = JSON.parse(xhr.responseText); } catch { /* non-JSON body */ }
       if (xhr.status >= 200 && xhr.status < 300 && j && j.ok) resolve(j);
-      else reject(new Error((j && j.error) || "Upload failed (" + xhr.status + ")"));
+      else reject(Object.assign(new Error((j && j.error) || "Upload failed (" + xhr.status + ")"), {status: xhr.status}));
     };
-    xhr.onerror = () => reject(new Error("Network error during upload"));
+    xhr.timeout = 10 * 60 * 1000;
+    xhr.ontimeout = () => reject(new TypeError("Upload timed out"));
+    xhr.onerror = () => reject(new TypeError("Network error during upload"));
     xhr.send(body);
   });
 }
@@ -1190,21 +1192,20 @@ function sleep(ms) {
 }
 
 function isRetriableUploadError(err) {
-  const msg = err && err.message ? String(err.message) : "";
-  if (msg.includes("Network error during upload")) return true;
-  return /\bUpload failed \((408|429|500|502|503|504)\)\b/.test(msg);
+  return err instanceof TypeError || [408, 409, 429, 500, 502, 503, 504].includes(err && err.status);
 }
 
 async function retryUpload(op, label) {
   let lastErr = null;
-  for (let attempt = 1; attempt <= SEGMENT_RETRY_MAX; attempt++) {
+  for (let attempt = 1; attempt <= 30; attempt++) {
     try {
       return await op();
     } catch (err) {
       lastErr = err;
-      if (!isRetriableUploadError(err) || attempt >= SEGMENT_RETRY_MAX) break;
-      const waitMs = SEGMENT_RETRY_BASE_MS * attempt;
-      clientLog("warn", label + " failed (" + (err.message || err) + "), retry " + (attempt + 1) + "/" + SEGMENT_RETRY_MAX + " in " + waitMs + " ms");
+      const limit = err.status === 409 ? 30 : SEGMENT_RETRY_MAX;
+      if (!isRetriableUploadError(err) || attempt >= limit) break;
+      const waitMs = SEGMENT_RETRY_BASE_MS * Math.min(attempt, 5);
+      clientLog("warn", label + " failed (" + (err.message || err) + "), retry " + (attempt + 1) + "/" + limit + " in " + waitMs + " ms");
       await sleep(waitMs);
     }
   }
@@ -1285,7 +1286,7 @@ async function singleUpload() {
     $("progress-speed").classList.add("hidden");
     setProgress(1, "Done");
   } catch (err) {
-    if (!isRetriableUploadError(err)) throw err;
+    if (!isRetriableUploadError(err) && err.status !== 413) throw err;
     clientLog("warn", "Single upload failed (" + (err.message || err) + "); retrying with segmented upload.");
     await segmentedUpload();
   }

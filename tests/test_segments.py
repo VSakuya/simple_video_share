@@ -70,6 +70,38 @@ class SegmentsTest(unittest.TestCase):
         self.assertEqual(self.start(resume_token=token).json['uploaded_parts'], [])
         self.assertEqual(self.client.post('/upload/seg/finish', data={'token': token}).status_code, 400)
 
+    def test_upload_spool_uses_storage_and_reports_quota(self):
+        import app as app_module
+        import logging
+        import errno
+        from flask import request, jsonify
+        from app import drive_worker, upload_request
+        with patch.object(app_module, '_STORAGE_DIR', self.root), patch.object(drive_worker.worker, 'resume_incomplete'), patch('app.log.setup_logging', return_value=logging.getLogger('regression')):
+            application = app_module.create_app()
+        application.config['TESTING'] = True
+        streams = []
+        @application.post('/upload/spool-probe')
+        def spool_probe():
+            stream = request.files['part'].stream
+            streams.append(stream)
+            return jsonify(size=len(stream.read()), rolled=stream._rolled)
+        client = application.test_client()
+        with client.session_transaction() as session:
+            session['user_id'] = self.uid
+            session['_csrf'] = 'test-csrf'
+        headers = {'X-CSRF-Token': 'test-csrf'}
+        with patch.object(upload_request, 'SpooledTemporaryFile', wraps=upload_request.SpooledTemporaryFile) as spool:
+            response = client.post('/upload/spool-probe', headers=headers, data={'part': (io.BytesIO(b'x' * 1048576), 'part.bin')})
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertEqual(response.json, dict(size=1048576, rolled=True))
+        self.assertEqual(Path(spool.call_args.kwargs['dir']), self.root / 'tmp/uploads')
+        self.assertTrue(streams[0].closed)
+        for code in (errno.EDQUOT, errno.ENOSPC):
+            with patch.object(upload_request, 'SpooledTemporaryFile', side_effect=OSError(code, 'quota test')):
+                response = client.post('/upload/spool-probe', headers=headers, data={'part': (io.BytesIO(b'x'), 'part.bin')})
+            self.assertEqual(response.status_code, 507)
+            self.assertFalse(response.json['ok'])
+
     def test_checksum_and_corruption(self):
         token = self.start().json['token']
         self.assertEqual(self.part(token, 0, b'zzzz').status_code, 400)

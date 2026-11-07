@@ -31,8 +31,8 @@ import { FFmpeg } from "./ffmpeg/lib/index.js";
 // e.g. /video as well as at the root.
 const SVS_BASE = (typeof window !== "undefined" && window.SVS_BASE) ? window.SVS_BASE : "";
 
-const SEGMENT_THRESHOLD = 256 * 1024 * 1024; // prefer segmented upload above 256 MB
 const SEGMENT_SIZE = 64 * 1024 * 1024; // 64 MB per part; keeps each multipart upload below proxy limits
+const SEGMENT_THRESHOLD = SEGMENT_SIZE; // any file larger than one part is segmented
 const SEGMENT_RETRY_MAX = 3;
 const SEGMENT_RETRY_BASE_MS = 1200;
 const MAX_HEIGHT = 1080;
@@ -712,7 +712,7 @@ export async function uploadVideo(blob, meta, ctx) {
       ctx.setProgress(1, "Done");
       return;
     } catch (err) {
-      if (!isRetriableUploadError(err)) throw err;
+      if (!isRetriableUploadError(err) && err.status !== 413) throw err;
       log("warn", "Single upload failed (" + (err.message || err) + "); retrying with segmented upload.");
     }
   }

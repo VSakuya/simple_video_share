@@ -69,6 +69,20 @@ def create_app() -> Flask:
     app.config["VIDEOS_DIR"] = videos_dir
     app.config["COVERS_DIR"] = covers_dir
     app.config["AVATARS_DIR"] = avatars_dir
+    # Multipart parsing precedes route-level space checks. Keep its temporary
+    # files on the storage disk instead of a small/quota-limited system tmpfs.
+    from .upload_request import UploadRequest
+    app.request_class = UploadRequest
+    app.config["UPLOAD_TEMP_DIR"] = _STORAGE_DIR / "tmp" / "uploads"
+
+    @app.errorhandler(OSError)
+    def upload_storage_error(error):
+        import errno
+        from flask import jsonify
+        if request.path.startswith('/upload/') and error.errno in (errno.ENOSPC, errno.EDQUOT):
+            app_logger.error('Upload temporary/storage space unavailable: %s', error)
+            return jsonify(ok=False, error='Upload storage is full or its disk quota is exceeded. Free server storage before retrying.'), 507
+        raise error
     app.config["DRIVE_FOLDER_ID"] = cfg.get("drive_folder_id", "")
     # Watch-together max seek wait (§17.4): max seconds the group stays paused
     # after a seek before resuming even if a client is still landing. The group
