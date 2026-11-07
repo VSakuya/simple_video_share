@@ -1201,13 +1201,14 @@ function selectedTagIds() {
   return el ? SVSTagInput.get(el) : [];
 }
 
-function resumeKey(sizeBytes, totalParts) {
+function resumeKey(sizeBytes, totalParts, fingerprint) {
   return "svs-seg-resume-v1|" + [
     titleInput.value || "",
     String(folderInput.value || ""),
     String(sizeBytes),
     String(totalParts),
     selectedTagIds().join(","),
+    fingerprint,
   ].join("|");
 }
 
@@ -1277,7 +1278,14 @@ async function singleUpload() {
 
 async function segmentedUpload() {
   const totalParts = Math.ceil(processedBlob.size / SEGMENT_SIZE);
-  const rKey = resumeKey(processedBlob.size, totalParts);
+  setProgress(0, "Checking file integrity…");
+  const hex = (buffer) => Array.from(new Uint8Array(buffer), b => b.toString(16).padStart(2, "0")).join("");
+  const checksums = [];
+  for (let i = 0; i < totalParts; i++) {
+    checksums.push(hex(await crypto.subtle.digest("SHA-256", await processedBlob.slice(i * SEGMENT_SIZE, (i + 1) * SEGMENT_SIZE).arrayBuffer())));
+  }
+  const fingerprint = hex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(checksums.join(""))));
+  const rKey = resumeKey(processedBlob.size, totalParts, fingerprint);
   const oldToken = loadResumeToken(rKey);
   clientLog("info", "Uploading (segmented) " + totalParts + " part(s) of " + fmtMB(processedBlob.size));
   const start = await retryUpload(async () => {
@@ -1290,12 +1298,13 @@ async function segmentedUpload() {
         expected_size: String(processedBlob.size),
         folder_id: folderInput.value || "",
         resume_token: oldToken,
+        fingerprint,
       }),
     });
     let j = null;
     try { j = await res.json(); } catch { /* non-JSON body */ }
     if (res.status >= 200 && res.status < 300 && j && j.ok) return j;
-    throw new Error((j && j.error) || "Upload failed (" + res.status + ")");
+    throw Object.assign(new Error((j && j.error) || "Upload failed (" + res.status + ")"), {status: res.status});
   }, "seg_start");
   const token = start.token;
   saveResumeToken(rKey, token);
@@ -1310,6 +1319,7 @@ async function segmentedUpload() {
     const fd = new FormData();
     fd.append("token", token);
     fd.append("part_index", String(i));
+    fd.append("sha256", checksums[i]);
     fd.append("part", part, "part_" + i + ".bin");
     setProgress(i / totalParts, "Uploading segment " + (i + 1) + "/" + totalParts + "…");
     await retryUpload(
