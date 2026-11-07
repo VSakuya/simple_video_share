@@ -39,6 +39,7 @@ credentials/*
 storage/
 testing/*
 !testing/test_services.py
+!testing/test_services_tls.py
 HANDOFF_mediabunny.md
 *.conf
 # Everything under documents/ is local working notes EXCEPT the requirements /

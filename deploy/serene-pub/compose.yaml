@@ -1,0 +1,45 @@
+name: serene-pub
+services:
+  serene-pub:
+    image: ${SERENE_IMAGE:-ghcr.io/doolijb/serene-pub:0.5.3-beta}
+    restart: unless-stopped
+    init: true
+    ports:
+      - "192.168.57.238:8234:3000"
+    volumes:
+      - serene-pub-data:/data
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: "3000"
+      SERENE_PUB_DATA_DIR: /data
+      SERENE_AUTO_OPEN: "1"
+      PUBLIC_URL: https://serene.services.vsakuya.xyz
+      # Cloud VPN client, home-router NAT, and this project's bridge gateway.
+      TRUSTED_PROXIES: 10.6.0.4,192.168.57.1,172.30.34.1
+      NODE_OPTIONS: --max-old-space-size=1024
+    mem_limit: 2g
+    memswap_limit: 3g
+    cpus: 2.0
+    pids_limit: 256
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      start_period: 120s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.30.34.0/24
+          gateway: 172.30.34.1
+volumes:
+  serene-pub-data:

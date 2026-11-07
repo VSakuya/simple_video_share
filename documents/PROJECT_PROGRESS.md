@@ -1,5 +1,136 @@
 # Project Requirements — Simple Video Share
 
+## 43. Local Serene Pub Docker deployment (registered 2026-11-08 05:02:54)
+
+### 43.1 Change Log (2026-11-08 05:14:54)
+
+| Change | Reason | Blast radius / review |
+| --- | --- | --- |
+| Deploy official Serene Pub 0.5.3-beta image on local server 192.168.57.238:8234 | Owner redirected deployment from the VPS to the local 16 GiB Ubuntu server | New isolated Compose project and persistent named volume; retain existing Jellyfin, SillyTavern and website services |
+| Install Docker on the local Ubuntu 24.04 host | Docker is absent; local host has 13 GiB available RAM and 245 GiB free disk | Root installer uses Docker's signed Ubuntu repository, preserves existing swap and forwarding policy; bounded container memory and logs; no Docker/swap changes on the VPS |
+| Preserve browser Origin/Referer through the authenticated gateway | Serene Pub/SvelteKit and Socket.IO validate the public origin | Small generic HTTP/WS header correction with regression coverage; retain login checks, CSRF headers and forwarded public host/protocol |
+| Validate service startup, restart, persistence and home model connectivity | Confirm usable deployment rather than a running process only | HTTP and Socket.IO checks plus a read-only /v1/models request from the container; owner initializes application accounts and model settings |
+
+Review: cloud deployment was stopped before any Docker installation. Target is
+now vsakuya@192.168.57.238, with SSH access confirmed. Prepare a concrete installer
+before requesting sudo interaction. Pin the official image, publish only the
+local server's LAN IP on port 8234, and leave application credentials, model
+settings and website service definitions for the owner unless requested.
+
+The owner ran the local root installer. Docker is active/enabled; official Serene
+Pub 0.5.3-beta is pinned to registry digest
+`sha256:f22a83dd8590849f8c606d34c3f3391b0586201e564ce65c832c36524f845793`.
+Compose publishes only 192.168.57.238:8234 and persists /data in the named volume,
+with 2 GiB memory/3 GiB memory-plus-swap, two CPU and bounded log limits. No swap
+or Docker changes were made on the cloud VPS. Jellyfin still returns HTTP 200.
+
+Verification: local app HTTP 200; Engine.IO and Socket.IO WebSocket connection
+handshakes both succeed; the cloud VPS reaches the app across WireGuard with
+HTTP 200; the home Strata /v1/models endpoint also returns HTTP 200. Compose YAML,
+Docker Compose configuration and installer shell syntax validate. Browser shows
+the Get Started page and Settings > System > Enable User Accounts control.
+Accounts are not enabled by default; enabling them requires the owner's admin
+passphrase, so no credentials or permanent account switch were submitted.
+Screenshot: storage/serene-pub-local.png. Website service entry remains owner-managed.
+
+The initial cloud gateway patch was rejected by automatic approval review after
+the target changed to local. The owner then explicitly authorized that separate
+proxy correction. Applied the minimal backed-up Origin/Referer preservation
+patch and restarted only custom-services-gateway.service; it is active and
+SillyTavern still serves its multi-user login redirects. Nine gateway integration
+tests pass, including original Origin/Referer, authentication, streaming and WS;
+scoped pyright passes. A full-project type check also reported an unrelated
+existing Path-versus-str error in app/upload_request.py, which was not modified.
+
+## 42. Enable SillyTavern multi-user mode (registered 2026-11-08 04:30:09)
+
+### 42.1 Change Log (2026-11-08 04:31:07)
+
+| Change | Reason | Blast radius / review |
+| --- | --- | --- |
+| Enable enableUserAccounts in the deployed SillyTavern config and restart its user unit | Owner reported single-user mode and requested separate users | Back up config; preserve existing accounts, passwords, data, model settings and account-picker preference; website accounts are not implicitly synchronized |
+
+Review: authorized by the owner's correction. Verify the setting and HTTP
+availability after restart; additional accounts are created through SillyTavern's
+administrator interface, not by inventing credentials or resetting the default user.
+
+Backed up the deployed config with mode 0600, enabled enableUserAccounts=true
+and restarted only sillytavern.service. Preserved enableDiscreetLogin=false for
+the existing account-picker preference, all credentials and all user data.
+Verification: service active, config flag true, listener still 127.0.0.1:8233;
+unauthenticated root and /login use account-selection redirects. A single
+passwordless account can still bypass the picker automatically, per upstream
+behavior; enabling multi-user mode does not create additional accounts.
+
+## 41. Production custom-service gateway (registered 2026-11-08 03:34:02)
+
+### 41.1 Change Log (2026-11-08 03:42:36)
+
+| Change | Reason | Blast radius / review |
+| --- | --- | --- |
+| Deploy the missing asynchronous gateway and production origin settings | Production still uses localhost defaults and has no gateway listener, causing blank iframes | New loopback user service; preserve upstream definitions, model settings and existing website authentication |
+| Prepare HTTPS reverse proxy for configured services under services.vsakuya.xyz | Isolated origins require public DNS and valid certificates | New Apache vhosts and ACME certificate; existing video/live/resume vhosts unchanged; owner must add wildcard DNS and execute sudo installer |
+| Reconcile service certificate names automatically | Newly added services must also work with only the three administrator fields | Root-owned restricted helper reads validated service slugs, obtains HTTP-01 certificates and reloads Apache only when needed; five-minute timer |
+| Verify via the supplied website test account | Reproduce and confirm the complete browser flow | Use credentials only for this website; no account or password changes |
+
+Review: root cause confirmed using production configuration/process inspection
+and browser reproduction. DNS lookup for the service domain currently has no
+answer. Root access still requires owner interaction. Prepare reviewable scripts
+before requesting that step; do not print website session or authorization codes.
+
+The owner added wildcard DNS at Gandi and executed the prepared sudo installer.
+Installed separate Apache HTTP-01/HTTPS virtual hosts and a valid certificate for
+traven.services.vsakuya.xyz, enabled the loopback-only user gateway on 8090,
+switched the website to production origins and restarted my_video.service.
+The root-owned custom-services-tls helper/timer automatically extends the
+certificate for new enabled service hosts every five minutes and renews it near
+expiry; adding services does not require another SSH/sudo command.
+
+Verification: browser reproduction initially showed a blank frame; after setup,
+the supplied test account loaded SillyTavern's welcome/persona dialog inside the
+website. No persona/model settings were submitted; the test account was logged
+out afterward. Anonymous public gateway requests return 401. Gateway and
+SillyTavern units are active, the gateway listens only on 127.0.0.1:8090, and the
+automatic TLS reconciliation completed with Result=success/ExecMainStatus=0.
+Five mocked reconciliation tests pass, covering new names, SAN expansion,
+unchanged certificates, DNS readiness and renewal. Installer bash syntax and
+Python compilation checks pass. Production proof is saved at
+`storage/sillytavern-production-fixed.png`. Existing website/live/resume virtual
+hosts, upstream definition, WireGuard and model settings remain unchanged.
+
+## 40. Server SillyTavern and home LLM tunnel (registered 2026-11-08 03:22:55)
+
+### 40.1 Change Log (2026-11-08 03:29:25)
+
+| Change | Reason | Blast radius / review |
+| --- | --- | --- |
+| Install official SillyTavern release under /home/vsakuya/services and run as the existing unprivileged user | User requested server deployment on 127.0.0.1:8233 | New app directory and user systemd unit; no website service entries or model configuration |
+| Prepare the supplied WireGuard profile as llm-home with split routes | Reach home LLM/Jellyfin without replacing the server default route or DNS | New dedicated interface; retain existing wg0; route only 192.168.57.0/24 and 10.6.0.0/24; private key stays out of repository/output |
+| Enable persistence and verify loopback binding plus Jellyfin HTTP connectivity | User requested a running service and working home connectivity | Requires sudo for the new WireGuard unit and user lingering; sudo currently requires interactive authentication, so prepare a concrete root installer if unavailable |
+
+Review: authorized by the user's deployment request. SSH hostname punctuation is
+resolved as video.vsakuya.xyz. Do not modify Apache, website service definitions,
+SillyTavern model settings, existing WireGuard peers, server default routing or DNS.
+
+Installed official SillyTavern 1.19.0 release commit 06bde93 in
+`/home/vsakuya/services/SillyTavern`, with an enabled user systemd unit,
+loopback-only IPv4 listener on 8233, persistent data directory and browser launch
+disabled. Initial frontend build exceeded the 256 MB Node heap; raised it to
+512 MB, disabled core dumps for this new unit, and verified a clean cached restart.
+
+The owner executed the staged sudo installer to install the root-owned
+`/etc/wireguard/llm-home.conf`, enable `wg-quick@llm-home` and enable user lingering.
+Confirmed the temporary user-readable private-key copy was removed. The tunnel
+uses 10.6.0.4/32 and routes only the home LAN and VPN subnets. Existing wg0,
+default routing and DNS remain unchanged.
+
+Verification over SSH: SillyTavern HTTP 200 after restart, `ss` shows only
+127.0.0.1:8233, user service active/enabled with zero automatic restarts;
+WireGuard active/enabled; Linger=yes; route to 192.168.57.238 uses llm-home;
+Jellyfin /web/ returns HTTP 200 through the VPN. Saved non-secret operating notes
+under `/home/vsakuya/.local/share/llm-home-setup/README.md`. No website service
+definition or model/provider settings were changed.
+
 ## 39. Custom services (registered 2026-11-08 03:04:04)
 
 ### 39.1 Change Log (2026-11-08 03:10:23)

@@ -179,12 +179,14 @@ class GatewayTest(DatabaseMixin, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status, 403)
 
     async def test_http_body_range_headers_cookies_and_redirects(self):
-        response = await self.client.post(URL("/api/echo?q=a%2Fb", encoded=True), data=b"payload", headers=dict(self.auth, Origin="http://demo.video.localhost:8090", **{"X-CSRF-Token": "upstream-token", "X-Forwarded-User": "spoof", "Remote-User": "spoof"}))
+        response = await self.client.post(URL("/api/echo?q=a%2Fb", encoded=True), data=b"payload", headers=dict(self.auth, Origin="http://demo.video.localhost:8090", Referer="http://demo.video.localhost:8090/chat", **{"X-CSRF-Token": "upstream-token", "X-Forwarded-User": "spoof", "Remote-User": "spoof"}))
         self.assertEqual(await response.read(), b"echo:payload")
         path, headers, body = self.received[-1]
         self.assertEqual(path, "/api/echo?q=a%2Fb")
         self.assertEqual(headers["Cookie"], "upstream=two")
         self.assertEqual(headers["X-CSRF-Token"], "upstream-token")
+        self.assertEqual(headers["Origin"], "http://demo.video.localhost:8090")
+        self.assertEqual(headers["Referer"], "http://demo.video.localhost:8090/chat")
         self.assertNotIn("X-Forwarded-User", headers)
         self.assertNotIn("Remote-User", headers)
         response = await self.client.get("/file", headers=dict(self.auth, Range="bytes=0-3"))

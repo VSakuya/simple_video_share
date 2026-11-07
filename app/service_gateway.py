@@ -165,11 +165,9 @@ async def handle(request):
         headers["Cookie"] = "; ".join(m.OutputString() for m in cookies.values())
     headers["X-Forwarded-Host"] = urlsplit(origin).netloc
     headers["X-Forwarded-Proto"] = urlsplit(origin).scheme
-    if headers.get("Origin") == origin:
-        headers["Origin"] = grant["upstream"]
-    referer = headers.get("Referer", "")
-    if referer.startswith(origin + "/"):
-        headers["Referer"] = grant["upstream"] + referer[len(origin):]
+    # Origin/Referer describe the browser's public origin. Preserve them for
+    # upstream CSRF and Socket.IO checks; forwarded host/proto identify the
+    # public endpoint to applications configured to trust this proxy.
     # Concatenate a fixed configured origin, never urljoin untrusted // paths.
     target = URL(grant["upstream"] + request.raw_path, encoded=True)
     watcher = asyncio.create_task(_watch(request, token, slug, asyncio.current_task()))

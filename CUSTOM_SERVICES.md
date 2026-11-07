@@ -86,6 +86,42 @@ port directly or broaden the website session cookie to the parent domain.
 No production vhost, DNS, certificates, deployment scripts or remote services
 are changed by this feature's local implementation.
 
+## Production installer for video.vsakuya.xyz
+
+`deploy/install_custom_services.sh` completes the separate production setup. Stage
+it and `deploy/custom_services_tls.py` in
+`/home/vsakuya/.local/share/custom-services-setup/`, then run the installer with
+sudo. It targets the existing project at `/home/vsakuya/simple_video_share` and
+website systemd unit `my_video.service`. It leaves existing Apache virtual hosts,
+upstream service definitions and SillyTavern model settings unchanged.
+
+Required DNS: `*.services.vsakuya.xyz` resolves directly to `206.237.20.173`.
+The installer adds separate ACME/HTTPS virtual hosts, obtains a certificate for
+the enabled service names, configures the production origins, enables the
+loopback gateway as a persistent user unit and restarts the website. It backs up
+the previous deployment configuration inside the protected staging directory.
+
+The root-owned `custom-services-tls.timer` checks every five minutes for new
+enabled service names and certificate renewal. New services use the wildcard
+DNS record; their individual hostnames are added to the certificate through
+HTTP-01 validation. Certificate changes reload Apache without restarting the
+website or gateway. Newly added names may therefore need up to five minutes to
+become available over HTTPS. This certificate approach supports up to 100 names;
+larger deployments should use an automatically renewed wildcard certificate.
+
+Status commands on the production host:
+
+```sh
+systemctl --user status custom-services-gateway.service
+systemctl status custom-services-tls.timer
+journalctl --user -u custom-services-gateway.service -n 50 --no-pager
+```
+
+Updating website code alone does not deploy this infrastructure. With the local
+default origin template, an HTTPS website attempts to open a `.localhost` service
+origin, which cannot serve a remote user's configured app and can leave a blank
+iframe. Always complete production setup before testing hosted services.
+
 ## Verification
 
 `python -m unittest discover -s testing -p test_services.py -v`
